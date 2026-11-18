@@ -62,6 +62,9 @@ jobs:
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "build-tools;34.0.0" "platforms;android-32" > /dev/null
+          # Bubblewrap expects sdkmanager at <sdk>/bin; GitHub's runners keep it in cmdline-tools/latest/bin
+          [ -e "$ANDROID_HOME/bin" ] || ln -s "$ANDROID_HOME/cmdline-tools/latest/bin" "$ANDROID_HOME/bin" || sudo ln -s "$ANDROID_HOME/cmdline-tools/latest/bin" "$ANDROID_HOME/bin"
+          ls "$ANDROID_HOME/bin/sdkmanager" "$ANDROID_HOME/build-tools/34.0.0/apksigner"
 
       - name: Install Meta's Bubblewrap
         if: steps.gate.outputs.ok == 'true'
