@@ -5,7 +5,7 @@
 #   ./sync.sh /path/to/jarvis-command-center
 #
 # Shared files are copied byte for byte. Never edit them here: change them in the source repo, then run this.
-# Website-only files (app.js, views.js, sheets.js, chart.js, demo.js, hud.js, panels.js, css/, index.html, sw.js) are not touched.
+# Website-only files (app.js, views.js, sheets.js, ideas.js, chart.js, demo.js, hud.js, panels.js, css/, index.html, sw.js) are not touched.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="${1:-$HERE/../../jarvis-command-center}"
@@ -60,7 +60,7 @@ for (const f of SHARED) {
   }
 }
 // Calls the shared brain makes on the app object: flag any the website's app.js does not define.
-const appSrc = ['app.js', 'views.js', 'sheets.js'].map(f => fs.readFileSync(path.join(js, f), 'utf8')).join('\n');
+const appSrc = ['app.js', 'views.js', 'sheets.js', 'ideas.js'].map(f => fs.readFileSync(path.join(js, f), 'utf8')).join('\n');
 const used = new Set([...fs.readFileSync(path.join(js, 'indai.js'), 'utf8').matchAll(/\bapp\.([a-zA-Z_]+)\s*\??\.?\(/g)].map(m => m[1]));
 for (const name of used) if (!new RegExp(`app\\.${name}\\s*=|\\b${name}\\s*\\(`).test(appSrc)) { console.error(`CHECK    indai.js calls app.${name}() and the website does not define it`); bad++; }
 console.log(bad ? `${bad} thing(s) to fix before publishing` : 'Stand-ins and app interface still match the shared code.');

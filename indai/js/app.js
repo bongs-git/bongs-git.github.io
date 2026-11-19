@@ -14,10 +14,11 @@ import { nearestLevel } from './panels.js';
 import { installRelayGuards, researchBlocked } from './demo.js';
 import { initViews } from './views.js';
 import { initSheets } from './sheets.js';
+import { initIdeas } from './ideas.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
-const SHEETS = ['analysis', 'calc', 'deep', 'summary', 'plan', 'selftest', 'settings'];
+const SHEETS = ['analysis', 'calc', 'deep', 'summary', 'plan', 'selftest', 'settings', 'ideas'];
 // ids the shared code marks dirty -> the website views that show that data
 const DIRTY_MAP = { plan: ['today', 'plan', 'indai'], dock: ['dock'], scenes: [], coach: [], risk: ['risk', 'today'] };
 
@@ -80,6 +81,17 @@ const say = (...a) => app.indai.say(...a);
   ind.talk = (opts) => { if (!app._tapTalk && app.inputMode === 'typed') return Promise.resolve(); app._quietTalk = !!opts?.quiet; return talk(opts); };
   // While web research can't run (today's thinking budget is used up, or research is paused after failing),
   // she doesn't promise to check the news at the end of a quant read.
+  // "Show me the ideas" (typed or spoken) opens today's list.
+  const route = ind.route.bind(ind);
+  ind.route = async (text) => {
+    if (!ind.awaiting && /^\s*(show|open|see|list|what are|where are)?\s*(me )?(all )?(the |my |today s |todays )?(trade |trading )?(ideas|setups|set ups)( today| list| so far)?\s*$/i.test(text)) {
+      const n = app.signals.filter(x => !x.practice).length;
+      app.openIdeas();
+      ind.say(n ? `${n} idea${n === 1 ? '' : 's'} so far today. Newest first.` : 'No setups have confirmed yet today. They show here the moment one does.', 'info');
+      return 'ok';
+    }
+    return route(text);
+  };
   const sayIt = ind.say.bind(ind);
   ind.say = (text, ...rest) => sayIt(typeof text === 'string' && researchBlocked() ? text.replace(/ Checking the news and today's events now\.$/, '') : text, ...rest);
   // Tapping the mic again (or letting go of the space bar) before saying anything simply closes the mic:
@@ -238,6 +250,16 @@ async function pollTradingView() {
 }
 // Live candles from the INDAI Bridge indicator running in your TradingView account.
 let bridgeSince = 0;
+let bridgeGot = 0;
+// TradingView posts each one-minute candle a few seconds after the minute turns. While the bridge is live, look every
+// 2.5 seconds from then until that candle is in (so a setup shows within seconds of its candle closing), and every
+// 8 seconds the rest of the time.
+function bridgeGap() {
+  if (marketStatus().state === 'closed') return 60000;
+  const now = Date.now(), sec = (now / 1000) % 60, since = now - bridgeGot;
+  const waiting = app.feed.bridgeLive && sec >= 1.5 && sec < 30 && since > sec * 1000;     // this minute's candles are not in yet
+  return waiting || since < 6000 ? 2500 : 8000;                                            // one ticker's candle in: the others follow
+}
 async function pollBridge() {
   if (app.feed.status.mode === 'demo') return;
   let j; try { j = await relay.tvBars(bridgeSince); } catch { return; }
@@ -247,6 +269,7 @@ async function pollBridge() {
     app.feed.applyBridgeBar(sym, { t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v }, b.tf || '1');
     bridgeSince = Math.max(bridgeSince, +b.t - 1);
   }
+  if (rows.length) { bridgeGot = Date.now(); scanSoon(); }
   if (rows.length && !app.bridgeAnnounced && app.feed.bridgeLive) { app.bridgeAnnounced = true; say('TradingView bridge connected. Charts and setup alerts are now on your live TradingView candles.', 'good', { speak: false }); }
 }
 app.openTradingView = (sym) => {
@@ -634,8 +657,25 @@ function maybeCheckIn() {
 }
 app.maybeCheckIn = maybeCheckIn;
 
-// ------------------------------------------------------------------ INDAI's own setup alerts
-const sigMem = { lastBar: {}, last: {}, hour: [], pausedNote: 0 };
+// ------------------------------------------------------------------ INDAI's own setup alerts ("ideas")
+// app.signals is today's list, newest first. It is kept for the New York day, so a reload (or iOS putting the
+// page to sleep) never loses the ideas, and setups that confirmed while nobody was looking are caught up quietly.
+const sigMem = { lastBar: {}, lastOne: {}, scanned: new Set(), last: {}, hour: [], pausedNote: 0 };
+const IDEAS_KEY = 'indai.web.ideas.v1';
+const ideaId = (s) => `${s.sym}|${s.strat}|${s.dir}|${s.barT}`;
+app.forming = {};                 // ticker -> a setup taking shape on the candle that is still open
+app.ideaFocus = null;             // the idea whose entry, stop and target are drawn on the chart
+let ideasDay = etParts().ymd;
+function storedIdeas() {
+  try { const j = JSON.parse(localStorage.getItem(IDEAS_KEY)); if (j && j.ymd === etParts().ymd && Array.isArray(j.list)) return j.list.filter(x => x && x.sym && x.contract && x.barT && x.id); } catch {}
+  return [];
+}
+function saveIdeas() {
+  if (app.feed.status.mode === 'demo') return;          // simulated ideas are never kept
+  try { localStorage.setItem(IDEAS_KEY, JSON.stringify({ ymd: ideasDay, list: app.signals.filter(x => !x.practice && !x.demo).slice(0, 40) })); } catch {}
+}
+function ideasChanged() { for (const v of ['indai', 'summary', 'today', 'ideabar', 'ideas', 'chart', 'watch', 'more']) app.markDirty(v); }
+if (app.settings.dataMode !== 'demo') app.signals = storedIdeas();
 function nextExpiries() {
   const p = etParts(), todayOk = isTradingDay(p.y, p.m, p.d) && Date.now() < etToMs(p.y, p.m, p.d, 16, 0);
   const today = todayOk ? fmtYMD(p.y, p.m, p.d) : fmtYMD(...nextTradingDay(p.y, p.m, p.d));
@@ -652,48 +692,180 @@ function leadDirection() {
   const dirs = ['SPY', 'QQQ'].map(s => { const b = completedBars(s); if (b.length < 4) return 0; const ch = b[b.length - 1].c - b[b.length - 4].c; return Math.abs(ch) / b[b.length - 1].c < 0.0005 ? 0 : Math.sign(ch); });
   return dirs[0] === dirs[1] ? dirs[0] : 0;
 }
+function contractFor(sig, plan, at = Date.now()) {
+  const q = app.feed.quote(sig.sym);
+  return suggestContract(sig, plan, { iv: q?.iv30 ? q.iv30 / 100 : 0.22, r: app.settings.rate ?? 0.04, strikeStep: strikeStep(sig.sym, sig.price), now: at, nextExpiry: nextExpiries() });
+}
+function setForming(sym, c) {
+  const was = app.forming[sym];
+  if (!was && !c) return;
+  if (c) app.forming[sym] = c; else delete app.forming[sym];
+  app.markDirty('ideabar'); app.markDirty('ideas'); app.markDirty('chart');
+  if (c && (!was || was.strat !== c.strat || was.dir !== c.dir)) app.onForming?.(c);
+}
+function clearForming() { for (const sym of Object.keys(app.forming)) setForming(sym, null); }
+// The score a setup needs right now, or null while alerts are off (breaker tripped or cooling down, or the plan
+// says stop once the goal is hit). While they are off nothing new is listed either, not even quietly.
+function alertFloor(plan) {
+  if (app.riskState().state !== 'armed') return null;
+  if (app.day.plan && app.day.goalHit) { if (plan.afterGoal === 'stop') return null; if (plan.afterGoal === 'aplus') return Math.max(plan.minScore, 80); }
+  return plan.minScore;
+}
+// Candles that close while alerts are off count as seen, so they are not "caught up" later.
+function markSeen() { for (const sym of app.settings.symbols) { const b = completedBars(sym); if (b.length) sigMem.scanned.add(sym + b[b.length - 1].t); } }
 function scanTick() {
   const ms = marketStatus();
   const demo = app.feed.status.mode === 'demo';
-  if (ms.state !== 'open' && !(demo && app.settings.demoSignals)) return;
+  if (ms.state !== 'open' && !(demo && app.settings.demoSignals)) { clearForming(); return; }
   const plan = app.activePlan();
   const rs = app.riskState();
-  if (rs.state !== 'armed') { if (Date.now() - sigMem.pausedNote > 30 * 60e3) { sigMem.pausedNote = Date.now(); say(`Setup alerts are paused while the breaker is ${rs.state === 'tripped' ? 'tripped' : 'on cooldown'}.`, 'risk', { speak: false }); } return; }
-  let minScore = plan.minScore;
-  if (app.day.plan && app.day.goalHit) { if (plan.afterGoal === 'stop') return; if (plan.afterGoal === 'aplus') minScore = Math.max(minScore, 80); }
+  if (rs.state !== 'armed') { clearForming(); markSeen(); if (Date.now() - sigMem.pausedNote > 30 * 60e3) { sigMem.pausedNote = Date.now(); say(`Setup alerts are paused while the breaker is ${rs.state === 'tripped' ? 'tripped' : 'on cooldown'}.`, 'risk', { speak: false }); } return; }
+  const minScore = alertFloor(plan);
+  if (minScore == null) { clearForming(); markSeen(); return; }
   const now = Date.now();
   sigMem.hour = sigMem.hour.filter(t => now - t < 3600e3);
   const lead = leadDirection();
+  const liveData = app.feed.status.mode === 'live' || app.feed.bridgeLive;
   for (const sym of app.settings.symbols) {
     const bars = completedBars(sym);
     if (bars.length < 6) continue;
     const lastT = bars[bars.length - 1].t;
-    if (sigMem.lastBar[sym] === lastT) continue;
-    sigMem.lastBar[sym] = lastT;
-    if (now - (lastT + 300e3) > (app.feed.status.mode === 'live' || app.feed.bridgeLive ? 6 * 60e3 : 25 * 60e3)) continue; // stale bar
-    const lv = app.levelsFor(sym);
-    const cands = scanSetups(sym, bars, { levels: lv, leadDir: ['SPY', 'QQQ'].includes(sym) ? 0 : lead, now, enabled: plan.strategies })
-      .filter(c => c.score >= minScore).sort((a, b) => b.score - a.score);
-    const sig = cands.find(c => now - (sigMem.last[sym + c.strat + c.dir] || 0) > 20 * 60e3);
-    if (!sig || sigMem.hour.length >= plan.perHour) continue;
-    sigMem.last[sym + sig.strat + sig.dir] = now; sigMem.hour.push(now);
-    const q = app.feed.quote(sym);
-    sig.contract = suggestContract(sig, plan, { iv: q?.iv30 ? q.iv30 / 100 : 0.22, r: app.settings.rate ?? 0.04, strikeStep: strikeStep(sym, sig.price), nextExpiry: nextExpiries() });
-    fireSignal(sig, plan);
+    const lv = app.levelsFor(sym), leadDir = ['SPY', 'QQQ'].includes(sym) ? 0 : lead;
+    if (sigMem.lastBar[sym] !== lastT) {
+      sigMem.lastBar[sym] = lastT;
+      setForming(sym, null);                                   // that candle has closed: it confirms now or not at all
+      if (now - (lastT + 300e3) > (liveData ? 6 * 60e3 : 25 * 60e3)) continue; // stale bar
+      sigMem.scanned.add(sym + lastT);
+      const cands = scanSetups(sym, bars, { levels: lv, leadDir, now, enabled: plan.strategies })
+        .filter(c => c.score >= minScore).sort((a, b) => b.score - a.score);
+      const sig = cands.find(c => now - (sigMem.last[sym + c.strat + c.dir] || 0) > 20 * 60e3);
+      if (!sig) continue;
+      sigMem.last[sym + sig.strat + sig.dir] = now;
+      // Past the plan's alerts-per-hour limit it is still listed, just without sounding an alert, so nothing good is hidden.
+      const quiet = sigMem.hour.length >= plan.perHour;
+      if (!quiet) sigMem.hour.push(now);
+      sig.contract = contractFor(sig, plan);
+      fireSignal(sig, plan, { quiet: quiet ? 'cap' : '' });
+      continue;
+    }
+    lookAhead(sym, bars, { lv, leadDir, plan, minScore, now, liveData });
   }
 }
-function fireSignal(sig, plan, { practice = false } = {}) {
-  app.signals.unshift(sig); if (app.signals.length > 30) app.signals.length = 30;
-  if (!practice) { app.day.signals = (app.day.signals || 0) + 1; saveDay(app.day); }
+// An early look at the candle that is still open: a setup that is taking shape shows as "forming" a minute or
+// more before the 5-minute candle closes and confirms it (or doesn't). Volume is projected to the full candle.
+function lookAhead(sym, done, { lv, leadDir, plan, minScore, now, liveData }) {
+  const five = app.feed.getBars(sym, '5min'), open = five[five.length - 1], lastDone = done[done.length - 1];
+  const one = app.feed.getBars(sym, '1min');
+  const latest = one.length ? one[one.length - 1].t + 60e3 : 0;      // how far into the open candle the data reaches
+  if (sigMem.lastOne[sym] === latest) return;                         // nothing new since the last look
+  sigMem.lastOne[sym] = latest;
+  const mins = open ? Math.round((latest - open.t) / 60e3) : 0;
+  if (!open || open.t !== lastDone.t + 300e3 || mins < 2 || mins > 4 || now - latest > (liveData ? 150e3 : 25 * 60e3)) { setForming(sym, null); return; }
+  const c = scanSetups(sym, [...done, { ...open, v: Math.round((open.v || 0) * 5 / mins) }], { levels: lv, leadDir, now, enabled: plan.strategies })
+    .filter(x => x.score >= minScore && now - (sigMem.last[sym + x.strat + x.dir] || 0) > 20 * 60e3).sort((a, b) => b.score - a.score)[0];
+  if (!c) { setForming(sym, null); return; }
+  c.forming = true; c.confirmAt = open.t + 300e3; c.id = 'forming|' + ideaId(c); c.contract = contractFor(c, plan);
+  if (app.feed.status.mode === 'demo') c.demo = true;
+  setForming(sym, c);
+}
+function fireSignal(sig, plan, { practice = false, quiet = '' } = {}) {
+  sig.id = ideaId(sig) + (practice ? '|practice' : '');
+  if (practice) app.signals = app.signals.filter(x => x.id !== sig.id);
+  else if (app.signals.some(x => x.id === sig.id)) return;            // already on the list
+  if (quiet) sig.quiet = quiet;
+  if (app.feed.status.mode === 'demo') sig.demo = true;
+  app.signals.push(sig); app.signals.sort((a, b) => b.at - a.at); if (app.signals.length > 40) app.signals.length = 40;
+  delete app.forming[sig.sym];
+  if (!practice && !quiet) { app.day.signals = (app.day.signals || 0) + 1; saveDay(app.day); }
+  if (!practice) saveIdeas();
+  ideasChanged();
+  if (quiet) return;
   const k = sig.contract, side = sig.type === 'C' ? 'call' : 'put';
   const delayed = practice ? '' : app.feed.status.mode === 'demo' ? ' Demo data.' : app.feed.status.mode === 'delayed' && !app.feed.bridgeLive ? ' Heads up, this is on delayed data.' : '';
   const grade = sig.score >= 80 ? 'A-plus' : sig.score >= 70 ? 'strong' : 'decent';
   const text = `${practice ? `Practice alert, replayed from the ${new Date(sig.barT + 300e3).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} candle. ` : ''}${sig.sym} ${side} setup, ${grade}, score ${sig.score}: ${sig.title}. Idea: the ${k.strike} ${side} ${k.expiry === nextExpiries().today ? 'for today' : 'for ' + new Date(k.expiry + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })}, about ${k.premium.toFixed(2)}, ${k.qty} contract${k.qty > 1 ? 's' : ''}, risking about ${fmtMoney(k.risk)}${k.overBudget ? `, which is over your ${fmtMoney(plan.riskPerTrade)} per-trade risk, so size down or skip` : ''}. Out if ${sig.sym} ${sig.dir > 0 ? 'loses' : 'gets back above'} ${fmtPrice(sig.stop)}; target ${fmtPrice(sig.target)}.${sig.against.length ? ' Watch: ' + sig.against.slice(0, 2).join(', ') + '.' : ''}${delayed}`;
-  say(text, sig.dir > 0 ? 'good' : 'risk');
+  // Everything is on screen at once (the conversation, the ideas strip and the alert card); out loud she keeps it to
+  // the few words that matter, so the alert is heard in seconds instead of half a minute.
+  const short = `${practice ? 'Practice alert. ' : ''}${sig.sym} ${side} setup, ${grade}, ${sig.score}. ${sig.title}. The ${k.strike} ${side}, about ${k.premium.toFixed(2)}. Stop ${fmtPrice(sig.stop)}, target ${fmtPrice(sig.target)}.`;
+  app._ideaSay = true;
+  try { say(text, sig.dir > 0 ? 'good' : 'risk', { speak: false }); say(short, sig.dir > 0 ? 'good' : 'risk', { log: false }); } finally { app._ideaSay = false; }
+  app.onIdea?.(sig);
   flash('watch'); if (sig.sym === app.settings.main) flash('chart');
-  app.markDirty('indai'); app.markDirty('summary'); app.markDirty('today');
   if (document.hidden) notify(`INDAI · ${sig.sym} ${side} setup (${sig.score})`, { body: `${sig.title}. ${k.strike}${sig.type} ≈ $${k.premium.toFixed(2)} × ${k.qty}. Stop ${fmtPrice(sig.stop)}, target ${fmtPrice(sig.target)}.`, icon: './icons/icon-192.png', tag: 'indai-' + sig.sym });
 }
+// Setups that confirmed while the page was closed, asleep in a pocket, or between reloads: replay today's candles
+// with the same rules and list the ones that are missing, without sounding an alert for something that is past.
+function catchUp() {
+  if (app.feed.status.mode === 'demo') return 0;
+  const p = etParts(), now = Date.now();
+  if (!isTradingDay(p.y, p.m, p.d)) return 0;
+  const open = etToMs(p.y, p.m, p.d, 9, 30);
+  if (now < open + 30 * 60e3) return 0;
+  const plan = app.activePlan(), found = [], floor = alertFloor(plan);
+  if (floor == null) return 0;
+  for (const sym of app.settings.symbols) {
+    const bars = completedBars(sym).filter(b => b.t >= open);
+    if (bars.length < 6) continue;
+    const lv = app.levelsFor(sym), last = {};
+    for (let i = 6; i <= bars.length; i++) {
+      const sub = bars.slice(0, i), barT = sub[i - 1].t, at = barT + 300e3;
+      if (sigMem.scanned.has(sym + barT) || now - at < 90e3) continue;   // the live scan had (or is about to have) this candle
+      const c = scanSetups(sym, sub, { levels: lv, leadDir: 0, now: at, enabled: plan.strategies })
+        .filter(x => x.score >= floor && at - (last[x.strat + x.dir] || 0) > 20 * 60e3).sort((a, b) => b.score - a.score)[0];
+      if (!c) continue;
+      last[c.strat + c.dir] = at; found.push({ ...c, at });
+    }
+  }
+  let added = 0;
+  for (const c of found) {
+    c.id = ideaId(c);
+    if (app.signals.some(x => !x.practice && (x.id === c.id || (x.sym === c.sym && x.strat === c.strat && x.dir === c.dir && Math.abs(x.barT - c.barT) < 20 * 60e3)))) continue;
+    c.quiet = 'earlier'; c.contract = contractFor(c, plan, c.at);
+    app.signals.push(c); added++;
+  }
+  if (added) { app.signals.sort((a, b) => b.at - a.at); if (app.signals.length > 40) app.signals.length = 40; saveIdeas(); ideasChanged(); }
+  return added;
+}
+app.catchUpIdeas = catchUp;
+// What has happened to an idea since its candle closed: did price reach the target or the stop first, and where is it now.
+app.ideaOutcome = (sig) => {
+  const q = app.feed.quote(sig.sym), last = q?.last ?? null, after = sig.barT + 300e3;
+  let bars = app.feed.getBars(sig.sym, '1min').filter(b => b.t >= after);
+  if (!bars.length) bars = app.feed.getBars(sig.sym, '5min').filter(b => b.t >= after);
+  let state = sig.forming ? 'forming' : 'open', at = 0;
+  if (!sig.forming) for (const b of bars) {
+    const stopHit = sig.dir > 0 ? b.l <= sig.stop : b.h >= sig.stop, targetHit = sig.dir > 0 ? b.h >= sig.target : b.l <= sig.target;
+    if (stopHit) { state = 'stopped'; at = b.t; break; }               // both inside one candle: count the stop
+    if (targetHit) { state = 'target'; at = b.t; break; }
+  }
+  const gain = last != null ? (last - sig.price) * sig.dir : 0;
+  const move = last != null ? gain / sig.price * 100 : null;          // percent in the idea's favour
+  const prog = gain >= 0 ? Math.min(1, gain / (Math.abs(sig.target - sig.price) || 1e-9)) : Math.max(-1, gain / (Math.abs(sig.price - sig.stop) || 1e-9));
+  return { state, at, last, move, prog };
+};
+// Ideas for one ticker, for the chart: where each confirmed, and which one has its levels drawn.
+app.ideasFor = (sym) => {
+  const list = app.signals.filter(x => x.sym === sym);
+  const f = app.forming[sym]; if (f) list.unshift(f);
+  const focus = list.find(x => x.id === app.ideaFocus) || list.find(x => !x.forming && Date.now() - x.at < 30 * 60e3) || null;
+  return list.map(x => ({ ...x, focus: x === focus }));
+};
+app.ideaById = (id) => app.signals.find(x => x.id === id) || Object.values(app.forming).find(x => x.id === id) || null;
+app.openIdeas = (id = null) => { app.ideaOpen = id; app.ui.openSheet('ideas'); };
+app.showIdeaOnChart = (sig) => {
+  app.ideaFocus = sig.id;
+  if (app.focus) app.closeFocus();
+  app.selectSymbol(sig.sym);
+  if (app.settings.interval === '15min') app.setTimeframe('5min');
+  if (app.layout === 'phone') app.ui.showTab('chart'); else document.getElementById('p-chart').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  app.markDirty('chart');
+};
+app.analyzeIdea = (sig) => {
+  app.ideaFocus = sig.id; app.inputMode = 'typed'; app._quietTalk = false;
+  if (app.focus) app.closeFocus();
+  if (app.layout === 'phone') app.ui.showTab('indai');
+  app.indai.analyzeSignal(sig);
+};
 // Android Chrome only allows notifications through the service worker; desktop browsers accept either.
 async function notify(title, opts) {
   try {
@@ -897,13 +1069,29 @@ function frame(now) {
 }
 app.redraw = schedule;
 
-const FEED_VIEWS = ['watch', 'chart', 'leadlag', 'levels', 'top', 'summary', 'deep', 'calc', 'today'];
+const FEED_VIEWS = ['watch', 'chart', 'leadlag', 'levels', 'top', 'summary', 'deep', 'calc', 'today', 'ideabar', 'ideas'];
 let lastFeedRev = -1, lastMode = null, lastSecond = 0, lastGex = 0, lastTV = 0, lastScan = 0, lastBridge = 0;
+// The setup scan runs the moment new candles land (and every few seconds as a backstop), not on a slow timer.
+const bootAt = Date.now();
+let lastCatchUp = 0, scanTimer = 0;
+function runScan() { lastScan = Date.now(); try { scanTick(); } catch (e) { console.warn('scan', e); } }
+function scanSoon() { clearTimeout(scanTimer); scanTimer = setTimeout(runScan, 120); }
+function runCatchUp({ tell = true } = {}) {
+  lastCatchUp = Date.now();
+  let n = 0; try { n = catchUp(); } catch (e) { console.warn('catch up', e); }
+  if (n && tell) app.toast(`${n} setup${n === 1 ? '' : 's'} confirmed earlier today ${n === 1 ? 'is' : 'are'} in Ideas`);
+  return n;
+}
 function tick() {
   const now = Date.now();
-  if (app.feed.rev !== lastFeedRev) { lastFeedRev = app.feed.rev; FEED_VIEWS.forEach(id => app.dirty.add(id)); schedule(); }
+  if (app.feed.rev !== lastFeedRev) { lastFeedRev = app.feed.rev; FEED_VIEWS.forEach(id => app.dirty.add(id)); schedule(); if (now - lastScan > 1500) scanSoon(); }
   if (app.feed.status.mode !== lastMode) {
     const was = lastMode; lastMode = app.feed.status.mode;
+    // ideas belong to the data they came from: simulated ones never mix with real ones
+    if (!was || (was === 'demo') !== (lastMode === 'demo')) {
+      app.signals = lastMode === 'demo' ? app.signals.filter(x => x.demo || x.practice) : [...app.signals.filter(x => x.practice && !x.demo), ...storedIdeas()].sort((a, b) => b.at - a.at);
+      app.forming = {}; sigMem.scanned.clear(); lastCatchUp = 0;
+    }
     if (was && lastMode === 'demo' && was !== 'demo') say("I couldn't reach market data, so these are demo prices for now. Everything still works for practice.", 'alert', { speak: false });
     app.markDirty('all');
   }
@@ -916,8 +1104,14 @@ function tick() {
   try { checkAlerts(); } catch (e) { console.warn(e); }
   if (now - lastGex > 8000) { lastGex = now; try { gexTick(); } catch (e) { console.warn(e); } }
   if (now - lastTV > 12000) { lastTV = now; pollTradingView(); }
-  if (now - lastBridge > (marketStatus().state === 'closed' ? 60000 : 8000)) { lastBridge = now; pollBridge(); }
-  if (now - lastScan > 15000) { lastScan = now; try { scanTick(); } catch (e) { console.warn('scan', e); } }
+  if (now - lastBridge > bridgeGap()) { lastBridge = now; pollBridge(); }
+  if (now - lastScan > 5000) runScan();
+  app.markDirty('ideabar'); if (app.focus === 'ideas') app.markDirty('ideas');
+  if (etParts().ymd !== ideasDay) { ideasDay = etParts().ymd; app.signals = app.signals.filter(x => x.practice); app.forming = {}; sigMem.scanned.clear(); saveIdeas(); ideasChanged(); }
+  // Ideas that confirmed before the page was opened: as soon as the candles are in, then again shortly after
+  // (tickers load at different speeds), then every two minutes as a backstop.
+  const barsIn = app.settings.symbols.some(x => app.feed.getBars(x, '5min').length >= 6);
+  if (now - bootAt > 3000 && barsIn && now - lastCatchUp > (now - bootAt < 90e3 ? 12e3 : 120e3)) runCatchUp();
   if (now - lastProbe > 45000) reconnect();
   // a quote pull failed: try again in a few seconds rather than leaving stale prices up until the next scheduled one
   if (app.feed.status.mode !== 'demo' && app.feed.status.cboe === 'err' && !document.hidden && now - lastRefresh > 4000) refreshNow();
@@ -958,6 +1152,7 @@ async function boot() {
   if (qp.get('nocheckin') === '1') app.noAutoCheckIn = true;
   app.ui = initViews(app);
   initSheets(app);
+  initIdeas(app);
   app.feed.start();
   loadMorningGex();
   setInterval(loadMorningGex, 10 * 60e3);
@@ -976,7 +1171,7 @@ async function boot() {
   const typing = () => /INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable;
   window.addEventListener('keydown', (ev) => { if (ev.code === 'Space' && !ev.repeat && !typing()) { ev.preventDefault(); if (!app.indai.listening) app.talk(); } });
   window.addEventListener('keyup', (ev) => { if (ev.code === 'Space' && !typing() && app.indai.voice.state.listening) { app._userStop = Date.now(); app.indai.voice.stop(); } });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); refreshNow(); tick(); app.wakeSound(); if (Date.now() - lastProbe > 8000) reconnect(); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); refreshNow(); tick(); app.wakeSound(); setTimeout(runCatchUp, 3500); setTimeout(runCatchUp, 12000); if (Date.now() - lastProbe > 8000) reconnect(); } });
   if (document.fonts?.ready) document.fonts.ready.then(() => app.markDirty('all'));
   // another tab (or the Quest app in this same browser) logged a trade or locked a plan: pick it up
   window.addEventListener('storage', (e) => { if (e.key === 'jarvis.day.v1') { app.day = loadDay(); if (!app.indai.awaiting) app.planDraft = defaultDraft(); app.markDirty('all'); } });

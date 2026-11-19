@@ -55,6 +55,11 @@
   </nav>
 </header>
 
+<div class="ideas" id="ideas" role="region" aria-label="Trade ideas">
+  <button type="button" class="ideas-all" id="ideas-all" aria-label="Open all of today's trade ideas"><b>Ideas</b><span class="n" id="ideas-n" hidden></span></button>
+  <div class="ideas-row" id="ideas-row"><span class="ideas-empty">&nbsp;</span></div>
+</div>
+
 <main id="app">
   <section class="view" data-view="watch">
     <article class="panel" id="p-watch" aria-labelledby="h-watch">
@@ -181,9 +186,11 @@
   <section class="sheet" id="sheet-summary" role="dialog" aria-modal="false" aria-labelledby="st-summary" hidden><header class="sh"><h2 id="st-summary">Everything at a glance</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-summary"></div></section>
   <section class="sheet" id="sheet-plan" role="dialog" aria-modal="false" aria-labelledby="st-plan" hidden><header class="sh"><h2 id="st-plan">Today's game plan</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-plan"></div></section>
   <section class="sheet" id="sheet-selftest" role="dialog" aria-modal="false" aria-labelledby="st-selftest" hidden><header class="sh"><h2 id="st-selftest">Self-test</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-selftest"></div></section>
+  <section class="sheet" id="sheet-ideas" role="dialog" aria-modal="false" aria-labelledby="st-ideas" hidden><header class="sh"><h2 id="st-ideas">Trade ideas</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-ideas"></div></section>
   <section class="sheet" id="sheet-settings" role="dialog" aria-modal="false" aria-labelledby="st-settings" hidden><header class="sh"><h2 id="st-settings">Settings</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-settings"></div></section>
 </div>
 
+<div id="idea-alert" role="alert" hidden></div>
 <button type="button" id="caption" hidden></button>
 <div id="toast" role="status" aria-live="polite"></div>
 

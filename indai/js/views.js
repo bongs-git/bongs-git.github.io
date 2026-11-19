@@ -54,7 +54,7 @@ export function initViews(app) {
   app.caption = (text, kind = 'info') => {
     if (talkVisible()) return;
     unseen = true; app.markDirty('dock');
-    if (/^[•✓✗]/.test(text)) return;
+    if (/^[•✓✗]/.test(text) || app._ideaSay) return;        // a new idea has its own card (ideas.js)
     cap.textContent = text; cap.className = kind; cap.hidden = false; capMode = 'msg';
     clearTimeout(cap._h); cap._h = setTimeout(() => { if (capMode === 'msg') hideCap(); }, Math.min(16000, 4500 + text.length * 45));
   };
@@ -105,7 +105,7 @@ export function initViews(app) {
     plan: () => app.openPlan(), startday: () => { if (app.layout === 'phone') ui.showTab('indai'); if (ind.awaiting) return; app.inputMode = 'typed'; ind.startDay({ voice: false, skipTemp: !!app.temp && Date.now() - app.temp.at < 5 * 60e3 }); },
     retemp: () => app.checkTemperature(true), practice: () => app.practiceAlert(), tv: () => app.openTradingView(), deep: () => app.openDeepDive(),
     mute: () => app.toggleMute(), install: () => installApp(), notnow: () => app.cancelCheckIn(),
-    details: () => ui.openSheet('analysis'), again: () => ind.repeat(),
+    details: () => ui.openSheet('analysis'), again: () => ind.repeat(), ideas: () => app.openIdeas(),
   };
   app.acts = ACTS;
   document.addEventListener('click', (e) => {
@@ -168,8 +168,10 @@ export function initViews(app) {
         const nEl = row.querySelector('.w-sym i');
         // outside regular hours the extended-hours move takes the small line; otherwise the nearest GEX level
         const ext = q && q.ext != null;
-        setText(nEl, ext ? `ext ${fmtPct(q.extPct)}` : near ? `${near.short} ${near.dist >= 0 ? '+' : ''}${near.dist.toFixed(2)}%` : '\u00a0');
-        setClass(nEl, ext ? cls(q.extPct) : near && Math.abs(near.dist) < 0.15 ? 'near' : '');
+        // a fresh idea on this ticker takes the small line for its first 20 minutes
+        const idea = app.forming[sym] || app.signals.find(x => x.sym === sym && !x.practice && Date.now() - x.at < 20 * 60e3);
+        setText(nEl, idea ? `${idea.dir > 0 ? '▲ call' : '▼ put'} ${idea.forming ? 'forming' : 'idea'} ${idea.score}` : ext ? `ext ${fmtPct(q.extPct)}` : near ? `${near.short} ${near.dist >= 0 ? '+' : ''}${near.dist.toFixed(2)}%` : '\u00a0');
+        setClass(nEl, idea ? (idea.dir > 0 ? 'up' : 'down') : ext ? cls(q.extPct) : near && Math.abs(near.dist) < 0.15 ? 'near' : '');
         setText(row.querySelector('.w-px b'), q ? fmtPrice(q.last) : '—');
         const pEl = row.querySelector('.w-px i');
         setText(pEl, q ? fmtPct(q.pct) : 'loading');
@@ -367,7 +369,8 @@ export function initViews(app) {
     if (stick) { log.scrollTop = log.scrollHeight; atBottom = true; }
   }
   function pinCard() {
-    const an = app.analysis, sig = app.signals[0], pin = $('i-pin');
+    // the newest idea that was not skipped (skipping only takes it off this card; it stays in the Ideas list)
+    const an = app.analysis, sig = app.signals.find(x => !x.skipped) || null, pin = $('i-pin');
     const showSig = sig && Date.now() - sig.at < 20 * 60e3 && (!an || sig.at > an.at);
     let key = '', html = '', kind = '';
     if (ind.awaiting) {
@@ -393,7 +396,7 @@ export function initViews(app) {
     pin.hidden = !key; pin.className = 'pin ' + kind; pin.innerHTML = html;
     if (showSig && !ind.awaiting) {
       $('pin-an').onclick = () => ind.analyzeSignal(sig);
-      $('pin-skip').onclick = () => { sig.at = 0; app.markDirty('indai'); };
+      $('pin-skip').onclick = () => { for (const x of app.signals) if (x.at <= sig.at) x.skipped = true; app.markDirty('indai'); };
     }
   }
   V.indai = {
@@ -469,7 +472,9 @@ export function initViews(app) {
     render() {
       const sym = app.settings.main, br = app.feed.status.tvAt, tv = app.tvAlerts.length;
       const bridge = app.feed.status.mode === 'demo' ? 'Off while on demo data' : app.feed.bridgeLive ? `Live, last candle ${timeET(br)}` : br ? `Quiet since ${timeET(br)}` : 'Not connected yet. Set it up in Settings';
+      const nIdeas = app.signals.filter(x => !x.practice).length;
       const items = [
+        ['ideas', 'Trade ideas', nIdeas ? `${nIdeas} today. Why, the contract, and what price did next` : 'Setups show here the moment they confirm'],
         ['calc', 'Options profit calculator', 'Payoff, breakevens and a price by time grid'],
         ['deep', `Deep dive on ${sym}`, 'Trend, flow, unusual activity and headlines'],
         ['summary', 'Everything at a glance', 'Watchlist, breaker and the last rating on one screen'],

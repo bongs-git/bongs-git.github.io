@@ -80,12 +80,15 @@ export class PriceChart {
     let lo = Math.min(...pts.map(p => p.b.l)), hi = Math.max(...pts.map(p => p.b.h));
     const lv = s.show.gex ? app.levelsFor(sym) : null;
     const span0 = hi - lo || hi * 0.002;
-    const lines = [], offscreen = [];
+    const lines = [], offscreen = [], offIdea = [];
     if (lv) {
       for (const [k, name, col, lw] of [['cw', 'Call wall', C.up, 1.5], ['zg', 'Gamma flip', C.amber, 1.5], ['pw', 'Put wall', C.down, 1.5], ['cw2', 'Call wall 2', hexA(C.up, 0.55), 1], ['pw2', 'Put wall 2', hexA(C.down, 0.55), 1]]) if (lv[k] != null) lines.push({ v: lv[k], name, col, w: lw, main: lw > 1 });
       if (lv.near) for (const [k, name, col] of [['cw', '0DTE call wall', C.up], ['pw', '0DTE put wall', C.down]]) if (lv.near[k] != null && lv.near[k] !== lv[k]) lines.push({ v: lv.near[k], name, col: hexA(col, 0.7), w: 1, dotted: true });
       for (const l of lines) { if (l.v > hi && l.v - hi < span0 * 0.6) hi = l.v; else if (l.v < lo && lo - l.v < span0 * 0.6) lo = l.v; }
     }
+    // Today's trade ideas for this ticker. The one in focus gets its entry, stop and target drawn, so make room for them.
+    const ideas = app.ideasFor ? app.ideasFor(sym) : [], focus = ideas.find(d => d.focus) || null;
+    if (focus) for (const v of [focus.stop, focus.target]) { if (v > hi && v - hi < span0 * 1.5) hi = v; else if (v < lo && lo - v < span0 * 1.5) lo = v; }
     const pad = (hi - lo) * 0.08 || 0.1; lo -= pad; hi += pad;
     const yv = (v) => plot.y + plot.h - ((v - lo) / (hi - lo)) * plot.h;
     // grid + price axis
@@ -173,6 +176,31 @@ export class PriceChart {
       if (offscreen.length) txt(ctx, offscreen.join('   '), plot.x + plot.w - 6, plot.y + 12, { size: 10.5, color: C.dim, align: 'right' });
       txt(ctx, levelSourceLabel(lv), plot.x + plot.w - 6, plot.y + plot.h - 6, { size: 10, color: lv.source === 'demo' ? C.amber : C.faint, align: 'right' });
     }
+    // Ideas: a small arrow under (call) or over (put) the candle that confirmed each one. For the one in focus,
+    // lines for the stop and the target from that candle onward, and a tick at the entry.
+    for (const d of ideas) {
+      const i = Math.floor(((d.forming ? d.barT : d.barT + 300e3 - 1) - sess.open) / ivMs), p = pts.find(k => k.i === i) || (d.forming ? pts[pts.length - 1] : null);
+      if (!p) continue;
+      const x = xi(p.i), up = d.dir > 0, col = up ? C.up : C.down, sz = d.focus ? 6.5 : 5;
+      const y = up ? Math.min(plot.y + plot.h - 2, yv(p.b.l) + 5) : Math.max(plot.y + 2, yv(p.b.h) - 5);
+      ctx.beginPath();
+      if (up) { ctx.moveTo(x, y); ctx.lineTo(x - sz, y + sz * 1.5); ctx.lineTo(x + sz, y + sz * 1.5); } else { ctx.moveTo(x, y); ctx.lineTo(x - sz, y - sz * 1.5); ctx.lineTo(x + sz, y - sz * 1.5); }
+      ctx.closePath();
+      if (d.forming) { ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([2, 2]); ctx.stroke(); ctx.setLineDash([]); }
+      else { ctx.fillStyle = d.focus ? col : hexA(col, 0.75); ctx.fill(); ctx.strokeStyle = 'rgba(5,7,9,0.9)'; ctx.lineWidth = 1; ctx.stroke(); }
+      if (!d.focus) continue;
+      const x0 = Math.max(plot.x, x), x1 = plot.x + plot.w;
+      for (const [v, name, c2] of [[d.stop, 'Stop', C.down], [d.target, 'Target', C.up]]) {
+        if (v > hi || v < lo) { offIdea.push(`${name} ${fmtPrice(v)} ${v > hi ? '↑' : '↓'}`); continue; }
+        const yy = Math.round(yv(v)) + 0.5;
+        ctx.strokeStyle = c2; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke(); ctx.setLineDash([]);
+        label(`${name} ${fmtPrice(v)}`, 'right', yy, { size: 11, color: c2 });
+      }
+      if (d.price <= hi && d.price >= lo) { const ye = Math.round(yv(d.price)) + 0.5; ctx.strokeStyle = C.text; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x - 9, ye); ctx.lineTo(x + 9, ye); ctx.stroke(); }
+      label(`${d.forming ? 'Forming' : up ? 'Call idea' : 'Put idea'} · ${d.score}`, 'left', up ? y + sz * 1.5 + 14 : y - sz * 1.5 - 6, { size: 10.5, color: col, spots: [[Math.min(plot.x + plot.w - 90, x + 10), up ? y + sz * 1.5 + 6 : y - sz * 1.5 + 2], [Math.max(plot.x + 4, x - 84), up ? y + sz * 1.5 + 6 : y - sz * 1.5 + 2]] });
+    }
+    if (offIdea.length) txt(ctx, offIdea.join('   '), plot.x + 6, plot.y + 12, { size: 10.5, color: C.dim });
     // last price tag
     const last = q ? q.last : bars[bars.length - 1].c;
     const ly = Math.round(yv(Math.min(hi, Math.max(lo, last)))) + 0.5;
