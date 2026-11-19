@@ -12,6 +12,10 @@ same backend, same brain, same voice. Only the screens are different.
 - Ideas strip under the top bar on every screen: each setup alert the moment its candle confirms (and "forming" a minute or
   more before), newest first. Tap one for the reasons, the sized contract, stop, entry and target, what price did next, and
   one tap to rate it or see it on the chart. The day's ideas survive a reload, and ones you missed are caught up quietly.
+- Push notifications (Settings): A-plus setups reach the phone with INDAI closed, sent by the backend from the TradingView
+  bridge candles. On iPhone, add INDAI to the Home Screen first.
+- Access lock: once the backend has an owner passcode, every device shows one screen asking for the access token and nothing
+  else until it is right.
 - Risk breaker: log wins and losses, loss limit, cooldowns, undo, position sizer and setup checklist.
 - INDAI conversation: tap the mic (or hold the space bar) and talk, or type. She answers out loud with the on-device voice,
   keeps listening for a follow-up, learns your mishears ("no, I said …"), remembers what you tell her ("remember that …"),

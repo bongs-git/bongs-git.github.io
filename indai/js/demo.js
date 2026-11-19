@@ -130,6 +130,7 @@ export function installRelayGuards(app) {
       if (care.outUntil || (!talk && care.fails)) { care.outUntil = 0; care.retryAt = 0; care.kind = ''; if (!talk) care.fails = 0; saveCare(); }
       return res;
     } catch (e) {
+      if (e.code === 'passcode') app.onTokenRejected?.();          // the access token was changed: lock.js asks for the new one
       if (e.code === 'budget' || e.code === 'rate_limited') {
         const budget = e.code === 'budget', now = Date.now();
         care.kind = budget ? 'budget' : 'rate';

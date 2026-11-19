@@ -1,12 +1,12 @@
 // INDAI website service worker: offline shell + always-fresh app files.
 // Market data, the backend and the voice models' downloads go straight to the network
 // (the models are kept by the browser's own model cache after the first download).
-const CACHE = 'indai-web-v2';
+const CACHE = 'indai-web-v3';
 // The on-device voice runtime (about 24 MB) is kept in its own cache so it is downloaded once and works offline.
 // sync.sh changes this name whenever those files change, which makes browsers fetch the new ones.
 const VOICE = 'indai-web-voice-17629cb';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './css/app.css',
-  './js/app.js', './js/views.js', './js/sheets.js', './js/chart.js', './js/demo.js', './js/ideas.js', './js/hud.js', './js/panels.js',
+  './js/app.js', './js/views.js', './js/sheets.js', './js/chart.js', './js/demo.js', './js/ideas.js', './js/lock.js', './js/push.js', './js/hud.js', './js/panels.js',
   './js/feeds.js', './js/market.js', './js/store.js', './js/indai.js', './js/voice.js', './js/relay.js', './js/options.js', './js/analysis.js', './js/speech.js', './js/signals.js',
   './fonts/geist.woff2', './fonts/geist-mono.woff2', './brand/indai-logo.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
@@ -21,6 +21,29 @@ function isolate(res) {
   h.set('Cross-Origin-Resource-Policy', 'cross-origin');
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
+// Push: a setup alert from the backend. Always show it (browsers require that), quietly if INDAI is already on screen.
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { try { d = { body: e.data.text() }; } catch {} }
+  const title = String(d.title || 'INDAI').slice(0, 80), body = String(d.body || '').slice(0, 240);
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    const onScreen = list.some(c => c.visibilityState === 'visible');
+    return self.registration.showNotification(title, {
+      body, tag: d.tag || (d.symbol ? 'indai-' + d.symbol : 'indai'), renotify: true, silent: onScreen,
+      icon: './icons/icon-192.png', badge: './icons/icon-192.png',
+      data: { symbol: d.symbol || null, barT: d.barT || null },
+    });
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const data = e.notification.data || {};
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    const open = list.find(c => c.url.startsWith(self.registration.scope));
+    if (open) { open.postMessage({ type: 'indai-open', symbol: data.symbol, barT: data.barT }); return open.focus(); }
+    return self.clients.openWindow(self.registration.scope + (data.symbol ? '?idea=' + encodeURIComponent(data.symbol) : ''));
+  }));
+});
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;

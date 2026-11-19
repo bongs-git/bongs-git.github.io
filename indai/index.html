@@ -191,6 +191,16 @@
 </div>
 
 <div id="idea-alert" role="alert" hidden></div>
+<div id="lock" hidden>
+  <form id="lock-form" autocomplete="off">
+    <img src="./brand/indai-logo.png" alt="INDAI" width="1380" height="350">
+    <h1>This INDAI is private</h1>
+    <p>Enter the access token to open it on this device.</p>
+    <input id="lock-input" type="password" autocomplete="current-password" aria-label="Access token" placeholder="Access token" spellcheck="false" autocapitalize="off">
+    <button type="submit" class="btn primary" id="lock-go">Unlock</button>
+    <p id="lock-msg" role="status"></p>
+  </form>
+</div>
 <button type="button" id="caption" hidden></button>
 <div id="toast" role="status" aria-live="polite"></div>
 

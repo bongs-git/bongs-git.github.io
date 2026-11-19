@@ -408,7 +408,9 @@ function initSettings(app) {
       <div><label for="s-depth">Research depth</label><select id="s-depth"><option value="fast">Fast (about 20 seconds)</option><option value="deep">Deep (slower, more thorough)</option></select></div>
       <div><label for="s-rate">Risk-free rate %</label><input id="s-rate" type="number" inputmode="decimal" min="0" max="15" step="0.1"></div>
     </div>
-    <label for="s-pass">Research passcode (only if you set one)</label><input id="s-pass" type="password" spellcheck="false">
+    <label for="s-pass">Access token (the INDAI passcode, only if one is set in the backend)</label><input id="s-pass" type="password" spellcheck="false" autocomplete="off">
+    <div id="lock-status" class="status"></div>
+    <div class="actions" style="margin-top:10px"><button type="button" id="s-lock-device" class="btn mini" hidden>Lock INDAI on this device</button></div>
 
     <h3>TradingView</h3>
     <p class="note"><b>INDAI Bridge</b> streams your TradingView candles into INDAI every minute, so charts and setup alerts run on your live TradingView data instead of delayed data. Add the <a href="/jarvis-command-center/tradingview/indai-bridge.pine" target="_blank" rel="noopener">INDAI Bridge indicator</a> to a 1-minute chart and create one alert with your INDAI webhook link. Any other TradingView alert sent to the same link is read out loud, and alerts with levels like <code>CW 700 PW 650 ZG 676</code> update the GEX lines. Webhooks need a paid TradingView plan with two-factor authentication on.</p>
@@ -421,7 +423,12 @@ function initSettings(app) {
     <label class="check"><input id="s-a-bells" type="checkbox"> Opening and closing bell</label>
     <label class="check"><input id="s-a-tv" type="checkbox"> Read out my TradingView alerts</label>
     <div class="actions" style="margin-top:8px"><button type="button" id="s-notify" class="btn mini">Notify me when INDAI is in the background</button></div>
-    <p class="note" style="margin-top:8px">Setup alerts arrive while INDAI is open. On a computer or Android a background tab still counts for a while; on iPhone and iPad keep INDAI on screen. Alerts with the app fully closed are on the backend to-do list.</p>
+    <p class="note" style="margin-top:8px">Setup alerts arrive while INDAI is open. On a computer or Android a background tab still counts for a while; on iPhone and iPad keep INDAI on screen, or turn on push below.</p>
+
+    <h3>Push notifications</h3>
+    <p class="note">Setup alerts on this device even when INDAI is closed or the screen is locked. The backend watches your TradingView bridge candles and sends your A-plus setups (score 80 and up), following today's plan and the risk breaker.</p>
+    <div id="push-status" class="status"></div>
+    <div class="actions" style="margin-top:10px"><button type="button" id="s-push-on" class="btn mini">Turn on push notifications</button><button type="button" id="s-push-test" class="btn mini" hidden>Send a test</button><button type="button" id="s-push-off" class="btn mini" hidden>Turn off</button></div>
 
     <h3>Headset-only</h3>
     <p class="note">Scenes, hand gestures and the gesture tutorial live in the Quest app. This website shares the same brain, data and game plan logic.</p>
@@ -483,6 +490,23 @@ function initSettings(app) {
     if (rEl.dataset.html !== rs) { rEl.dataset.html = rs; rEl.innerHTML = rs; }
     $('s-brain-retry').hidden = care.out !== 'budget'; $('s-research-resume').hidden = !care.researchPaused;
     $('research-actions').hidden = care.out !== 'budget' && !care.researchPaused;
+    const lk = app.lockState ? app.lockState() : { required: false };
+    $('lock-status').innerHTML = lk.required ? '<span class="ok">This INDAI is locked to its access token.</span> Thinking, memory and push only answer with it.' : b.checked && b.configured ? '<span class="warn">No access token is set in the backend.</span> Anyone who opens this page can talk to INDAI on your budget. Setting the INDAI_PASSCODE secret in the backend locks it.' : '';
+    $('s-lock-device').hidden = !(lk.required && s.researchPass);
+    const pu = app.push ? app.push.state : { status: 'unsupported' };
+    const PUSH = {
+      checking: 'Checking…',
+      unsupported: "This browser can't receive push notifications.",
+      install: 'On iPhone and iPad, push only works from the Home Screen app. In Safari tap Share, then Add to Home Screen. Open INDAI from that icon and turn push on here.',
+      blocked: '<span class="warn">Notifications are blocked for INDAI.</span> Allow them in the phone or browser settings for this site, then come back.',
+      backend: '<span class="warn">Push is not switched on in the backend yet.</span> It needs its push keys (three secrets).',
+      token: '<span class="warn">Push needs your access token.</span> Set the INDAI_PASSCODE secret in the backend, then enter the same token under Research above.',
+      off: 'Off on this device.',
+      on: '<span class="ok">On for this device.</span> A-plus setups reach you with INDAI closed. Open INDAI once on a trading day so the backend has today\'s plan.',
+    };
+    $('push-status').innerHTML = (PUSH[pu.status] || '') + (pu.note && !['backend', 'token'].includes(pu.status) ? `\n${esc(pu.note)}` : '');
+    $('s-push-on').hidden = !['off', 'backend', 'token', 'blocked'].includes(pu.status); $('s-push-on').disabled = !!pu.busy;
+    $('s-push-test').hidden = pu.status !== 'on'; $('s-push-off').hidden = pu.status !== 'on';
     const nb = $('s-notify');
     nb.hidden = !('Notification' in window);
     if ('Notification' in window) nb.textContent = Notification.permission === 'granted' ? 'Background notifications are on' : Notification.permission === 'denied' ? 'Notifications are blocked in the browser' : 'Notify me when INDAI is in the background';
@@ -543,6 +567,15 @@ function initSettings(app) {
   $('s-mic-test').addEventListener('click', async () => { const r = await app.primeMic(); toast(r === 'denied' ? 'Microphone is blocked for this site. Allow it in the browser settings.' : r === 'unavailable' ? 'This browser has no microphone access.' : 'Microphone allowed'); });
   $('s-fh-show').addEventListener('click', (e) => { const el = $('s-fh'); el.type = el.type === 'password' ? 'text' : 'password'; e.target.textContent = el.type === 'password' ? 'Show' : 'Hide'; });
   $('s-selftest').addEventListener('click', () => { delete body.dataset.open; app.indai.voice.unlock(); app.indai.selfTest(); });
+  $('s-lock-device').addEventListener('click', (e) => {
+    const b2 = e.currentTarget;
+    if (b2.dataset.armed) { app.lockDevice(); return; }
+    b2.dataset.armed = '1'; b2.textContent = 'Tap again to lock (you will need the token to get back in)';
+    setTimeout(() => { delete b2.dataset.armed; b2.textContent = 'Lock INDAI on this device'; }, 5000);
+  });
+  $('s-push-on').addEventListener('click', async () => { await app.push.enable(); updateStatus(); });
+  $('s-push-test').addEventListener('click', () => app.push.test());
+  $('s-push-off').addEventListener('click', async () => { await app.push.disable(); updateStatus(); });
   $('s-brain-retry').addEventListener('click', () => { brainRetry(); toast('Ask her something and she will try her thinking brain again'); updateStatus(); });
   $('s-research-resume').addEventListener('click', () => { resumeResearch(); toast('Web research is back on for your next trade idea'); updateStatus(); });
   $('s-forget-speech').addEventListener('click', (e) => {

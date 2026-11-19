@@ -158,6 +158,18 @@ input::placeholder { color: var(--faint); }
 .idea-body .pin-actions .btn { min-height: 44px; flex: 1; }
 .idea-none { color: var(--dim); font-size: 14px; padding: 18px 4px; }
 
+/* ---------- access lock: nothing else exists on the page until the token is right ---------- */
+body.locked > *:not(#lock) { display: none !important; }
+#lock { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: calc(24px + var(--sat)) 24px calc(24px + var(--sab)); background: var(--ink); overflow: auto; }
+#lock form { width: min(360px, 100%); display: grid; gap: 14px; justify-items: stretch; text-align: center; }
+#lock img { height: 30px; width: auto; justify-self: center; margin-bottom: 10px; }
+#lock h1 { margin: 0; font-size: 20px; font-weight: 600; }
+#lock p { color: var(--dim); font-size: 14px; }
+#lock input { height: 48px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line2); background: var(--raised); font-size: 16px; text-align: center; }
+#lock input:focus { outline: 2px solid var(--gold-line); outline-offset: 1px; }
+#lock .btn { min-height: 48px; }
+#lock-msg { min-height: 20px; color: var(--amber) !important; }
+
 /* ---------- panels ---------- */
 #app { padding: var(--gap) max(var(--gap), var(--sar)) calc(var(--tab-h) + var(--sab) + 92px) max(var(--gap), var(--sal)); }
 .view { display: none; gap: var(--gap); align-content: start; }

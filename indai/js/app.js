@@ -15,6 +15,8 @@ import { installRelayGuards, researchBlocked } from './demo.js';
 import { initViews } from './views.js';
 import { initSheets } from './sheets.js';
 import { initIdeas } from './ideas.js';
+import { initLock } from './lock.js';
+import { initPush } from './push.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
@@ -405,6 +407,7 @@ app.resetDay = () => { app.day = freshDay(); persistDay(); app.markDirty('all');
 
 // ------------------------------------------------------------------ INDAI actions
 function firstGesture() {
+  if (app.locked) return;
   app.indai.voice.unlock();
   app.unlockSound();
   if (firstGesture.done) return;
@@ -641,7 +644,7 @@ app.checkTemperature = async (force = false) => {
 };
 // Each trading day, the first time you touch the app, INDAI reads the market and asks for the day's plan.
 function maybeCheckIn() {
-  if (app.day.plan || app.checkInStarted || app.noAutoCheckIn) return;
+  if (app.locked || app.day.plan || app.checkInStarted || app.noAutoCheckIn) return;
   const p = etParts();
   if (!isTradingDay(p.y, p.m, p.d) || p.h < 6 || p.h >= 16) return;
   app.checkInStarted = true;
@@ -1113,6 +1116,7 @@ function runCatchUp({ tell = true } = {}) {
 }
 app.runCatchUp = runCatchUp;
 function tick() {
+  if (app.locked) return;                       // behind the access lock nothing runs
   const now = Date.now();
   if (app.feed.rev !== lastFeedRev) { lastFeedRev = app.feed.rev; FEED_VIEWS.forEach(id => app.dirty.add(id)); schedule(); if (now - lastScan > 1500) scanSoon(); }
   if (app.feed.status.mode !== lastMode) {
@@ -1183,6 +1187,9 @@ async function boot() {
   app.ui = initViews(app);
   initSheets(app);
   initIdeas(app);
+  initPush(app);
+  // Behind the access lock nothing starts: no prices, no alerts, no voice. Unlocking reloads the page.
+  if (initLock(app)) { window.__indai = { app, relay }; return; }
   app.feed.start();
   loadMorningGex();
   setInterval(loadMorningGex, 10 * 60e3);
@@ -1214,6 +1221,9 @@ async function boot() {
     });
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
+  // opened from a push notification while INDAI was closed: bring that ticker's idea up once today's list is in
+  const want = (qp.get('idea') || '').toUpperCase();
+  if (want) setTimeout(() => { if (app.locked) return; if (app.settings.symbols.includes(want)) app.selectSymbol(want); const hit = app.signals.find(x => x.sym === want); app.openIdeas(hit ? hit.id : null); }, 7000);
   if (qp.get('settings') === '1') app.openSettings();
   if (qp.get('calc') === '1') app.openCalc();
   if (qp.get('selftest') === '1') setTimeout(() => app.indai.selfTest(), 5000);
