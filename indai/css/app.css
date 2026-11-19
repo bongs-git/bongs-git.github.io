@@ -179,6 +179,15 @@ input::placeholder { color: var(--faint); }
 .rlist.changes li { display: grid; gap: 1px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .rlist.changes span { font-size: 12px; color: var(--dim); }
 #sb-ideas .note + .pin-actions, #sb-ideas .rlist + .note { margin-top: 10px; }
+.rtable { width: 100%; border-collapse: collapse; margin: 4px 0 10px; font-size: 13px; }
+.rtable th { text-align: left; font-weight: 400; color: var(--dim); padding: 7px 8px 7px 0; }
+.rtable td { text-align: right; padding: 7px 0 7px 8px; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rtable thead td { font: 600 11.5px var(--sans); color: var(--dim); white-space: normal; vertical-align: bottom; }
+.rtable thead th { font-weight: 600; color: var(--text); }
+.rtable tbody tr { border-top: 1px solid var(--line); }
+.rtable.days td { font-size: 12px; }
+.rlist.steps { list-style: decimal; padding-left: 20px; margin: 10px 0; } .rlist.steps li { padding-left: 2px; }
+#sb-ideas a.btn { text-decoration: none; }
 @media (max-width: 359px) { .rtiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .retro-cta { grid-template-columns: 1fr; } }
 
 /* ---------- access lock: nothing else exists on the page until the token is right ---------- */

@@ -15,6 +15,12 @@ same backend, same brain, same voice. Only the screens are different.
 - Retrospective (button in Ideas, best after the close): how the day's setups did, where they missed most (time of day, kind
   of setup, direction, ticker, entry, stop, target), and what INDAI would change. You apply the changes; she alerts with
   them from then on, and each new day checks whether they held up.
+- Back-test of the changes (inside the Retrospective): the kept days with and without the changes, side by side: setups
+  alerted, win rate, result, average per setup, dollars at your risk per trade, profit factor, deepest drawdown, longest
+  losing run, and each day on its own. "The fair test" judges each day with only what was learned before it.
+- TradingView back-test and Bar Replay (`tradingview/`): the same scanner as a TradingView strategy, for months of history
+  in the Strategy Tester and candle-by-candle simulation with Bar Replay. The Retrospective copies the changes as one
+  line to paste into the strategy's settings.
 - Push notifications (Settings): A-plus setups reach the phone with INDAI closed, sent by the backend from the TradingView
   bridge candles. On iPhone, add INDAI to the Home Screen first.
 - Access lock: once the backend has an owner passcode, every device shows one screen asking for the access token and nothing

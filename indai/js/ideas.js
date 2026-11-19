@@ -106,7 +106,18 @@ export function initIdeas(app) {
     if (html === listKey) return; listKey = html;
     const top = body.scrollTop; body.innerHTML = html; body.scrollTop = top;
   }
-  app.openRetro = () => { app.ideasView = 'retro'; rv = null; armed = ''; listKey = ''; holdUntil = 0; hideAlert(); body.scrollTop = 0; app.ui.openSheet('ideas'); };
+  // the TradingView strategy is fetched ahead of the tap, because a phone only lets a page copy during the tap itself
+  let pineText = '';
+  const loadPine = () => { if (!pineText) fetch('./tradingview/indai-backtest.pine').then(r => (r.ok ? r.text() : '')).then(t => { pineText = t || ''; }).catch(() => {}); };
+  async function copyText(text, done) {
+    try { await navigator.clipboard.writeText(text); app.toast(done); }
+    catch {
+      const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;left:-9999px;top:0'; document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch {}
+      ta.remove(); app.toast(ok ? done : 'Copying is blocked here. Open the script page and copy from there.');
+    }
+  }
+  app.openRetro = () => { app.ideasView = 'retro'; rv = null; armed = ''; listKey = ''; holdUntil = 0; hideAlert(); body.scrollTop = 0; loadPine(); app.ui.openSheet('ideas'); };
   app.retroTalk = async (r) => {
     if (!r || !r.today || !r.today.recs.length) return;
     const f = dayFacts(r.today.recs);
@@ -150,6 +161,8 @@ export function initIdeas(app) {
     if (rb) {
       const act = rb.dataset.retro; holdUntil = 0; listKey = '';
       if (act === 'open') { app.openRetro(); return; }
+      if (act === 'copycode') { copyText(rb.dataset.code, 'Copied. Paste it into the strategy’s Changes setting in TradingView.'); return; }
+      if (act === 'copyscript') { if (pineText) copyText(pineText, 'Script copied. Paste it into TradingView’s Pine Editor and save it.'); else window.open('./tradingview/', '_blank', 'noopener'); return; }
       if (act === 'back') { app.ideasView = 'list'; body.scrollTop = 0; }
       else if (act === 'apply' && rv) { app.retro.apply(rv.proposal); app.toast('Applied. She alerts with these from now on.'); rv = null; }
       else if (act === 'keep') { app.toast('Nothing changed'); app.ideasView = 'list'; body.scrollTop = 0; }

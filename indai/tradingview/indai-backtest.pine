@@ -1,0 +1,469 @@
+//@version=5
+// INDAI Backtest
+//
+// INDAI's setup scanner as a TradingView strategy, so its ideas can be back-tested on months of real candles
+// (Strategy Tester: net profit, win rate, profit factor, drawdown, every trade) and watched candle by candle
+// (Bar Replay), with and without the changes INDAI proposes in the Retrospective.
+//
+// How to use it
+//   1. Open a 5-minute chart of the ticker, regular trading hours.
+//   2. Add this strategy. In its settings, set the score line and the risk per trade to match your plan.
+//   3. In the INDAI website open Ideas, Retrospective, and tap "Copy the changes for TradingView".
+//      Paste that line into "Changes" here. Untick "Apply the changes" to see the same test without them.
+//   4. The Strategy Tester tab has all the numbers. Bar Replay plays the day forward one candle at a time.
+//
+// What it does and does not match
+//   - The setups, scores, stops and targets are the app's scanner, line for line (EMA clouds, VWAP, opening range,
+//     and GEX walls when you type levels in). Indicators start again each session, exactly as in the app.
+//   - It takes one trade at a time on this ticker. The app lists every idea, including ones that overlap.
+//   - GEX levels change every day and TradingView does not have them, so GEX-wall setups are off unless you type
+//     levels in, and then the same levels are used for every day of the test.
+//   - The alerts-per-hour limit only counts this ticker here. In the app it counts the whole watchlist.
+//   - Trades are closed on the last candle of the session. No commission or slippage is counted unless you set
+//     them in the strategy's Properties. Keep this script on Pine version 5.
+//   - Results are on the stock, sized so that a stop-out as the scanner calls it loses "Risk per trade".
+//     They are not option fills. Past results do not promise future ones. This is information, not financial advice.
+strategy("INDAI Backtest", shorttitle = "INDAI BT", overlay = true, initial_capital = 100000, currency = currency.USD, pyramiding = 0, default_qty_type = strategy.fixed, default_qty_value = 1, process_orders_on_close = true, calc_on_every_tick = false, max_labels_count = 500)
+
+// ---------------------------------------------------------------- settings
+G1 = "Plan (match the app)"
+minScoreIn = input.int(64, "Alert at this score and up (balanced 64, conservative 75, aggressive 54)", minval = 0, maxval = 100, group = G1)
+perHourIn  = input.int(4, "Most alerts in an hour", minval = 1, group = G1)
+riskUsd    = input.float(100.0, "Risk per trade in dollars", minval = 1.0, group = G1)
+useEma     = input.bool(true, "EMA cloud setups", group = G1)
+useVwap    = input.bool(true, "VWAP setups", group = G1)
+useOrb     = input.bool(true, "Opening range setups", group = G1)
+useGex     = input.bool(false, "GEX wall setups (needs the levels below)", group = G1)
+G2 = "What INDAI learned (from the Retrospective)"
+applyIn = input.bool(true, "Apply the changes", group = G2)
+codeIn  = input.string("", "Changes (paste the line from the app)", group = G2)
+G3 = "GEX levels, used for every day of the test (0 = none)"
+cwIn  = input.float(0.0, "Call wall", group = G3)
+pwIn  = input.float(0.0, "Put wall", group = G3)
+zgIn  = input.float(0.0, "Gamma flip", group = G3)
+cw2In = input.float(0.0, "Call wall 2", group = G3)
+pw2In = input.float(0.0, "Put wall 2", group = G3)
+G4 = "Display"
+showLabels = input.bool(true, "Mark every alert with its score", group = G4)
+showLines  = input.bool(true, "Draw the session VWAP and the fast EMA cloud", group = G4)
+
+TZ = "America/New_York"
+float cw  = cwIn  > 0 and useGex ? cwIn  : na
+float pw  = pwIn  > 0 and useGex ? pwIn  : na
+float zg  = zgIn  > 0 and useGex ? zgIn  : na
+float cw2 = cw2In > 0 and useGex ? cw2In : na
+float pw2 = pw2In > 0 and useGex ? pw2In : na
+
+// ---------------------------------------------------------------- the changes line: key=points;key=points;...
+var string[] adjKeys = array.new_string(0)
+var float[]  adjVals = array.new_float(0)
+if barstate.isfirst and applyIn and str.length(codeIn) > 0
+    string[] parts = str.split(codeIn, ";")
+    for part in parts
+        string[] kv = str.split(part, "=")
+        if array.size(kv) == 2
+            float val = str.tonumber(array.get(kv, 1))
+            if not na(val)
+                array.push(adjKeys, array.get(kv, 0))
+                array.push(adjVals, val)
+adj(string key) =>
+    int i = array.indexof(adjKeys, key)
+    i >= 0 ? array.get(adjVals, i) : 0.0
+float minAdd     = adj("minadd")
+float stopMultIn = adj("stop")
+float tgtMultIn  = adj("target")
+float stopMult   = stopMultIn > 0 ? stopMultIn : 1.0
+float tgtMult    = tgtMultIn > 0 ? tgtMultIn : 1.0
+float scoreLine  = minScoreIn + minAdd
+
+// ---------------------------------------------------------------- the session, one candle at a time
+int mins    = hour(time, TZ) * 60 + minute(time, TZ)
+int dayKey  = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+bool is5    = timeframe.period == "5"
+bool inSess = is5 and mins >= 570 and mins < 960
+int confirm = mins + 5
+
+var int   lastDay = na
+var int   si = -1
+var float e5 = na
+var float e12 = na
+var float e26 = na
+var float e34 = na
+var float e50 = na
+var float pvSum = na
+var float vSum = na
+var float vw = na
+var float macdLine = na
+var float sigState = na
+var float gSum = na
+var float lSum = na
+var float prevClose = na
+var float dayHi = na
+var float dayLo = na
+var float orHi = na
+var float orLo = na
+var bool  priorAbove = false
+var bool  priorBelow = false
+var bool  dayOk = false
+var float[] vols = array.new_float(0)
+var float[] hi4 = array.new_float(0)
+var float[] lo4 = array.new_float(0)
+
+// values for this candle that the scoring below reads
+float pE5 = na
+float pE12 = na
+float pVw = na
+float pC = na
+float hist = na
+bool  histRising = false
+float rsiNow = na
+float volR = 1.0
+int   fastNow = 0
+int   fastPrev = 0
+int   slowNow = 0
+float swingHi = na
+float swingLo = na
+bool  firstBar = false
+
+kOf(float p) => 2.0 / (p + 1.0)
+
+if inSess
+    firstBar := na(lastDay) or lastDay != dayKey
+    if firstBar
+        lastDay := dayKey
+        si := 0
+        dayOk := mins == 570           // the count of candles only means anything when the day starts at 9:30
+    else
+        si += 1
+    pE5 := e5
+    pE12 := e12
+    pVw := vw
+    pC := prevClose
+    float pLine = macdLine
+    float pSig = sigState
+    // moving averages start again every session, from the first candle
+    e5  := firstBar ? close : close * kOf(5)  + e5  * (1 - kOf(5))
+    e12 := firstBar ? close : close * kOf(12) + e12 * (1 - kOf(12))
+    e26 := firstBar ? close : close * kOf(26) + e26 * (1 - kOf(26))
+    e34 := firstBar ? close : close * kOf(34) + e34 * (1 - kOf(34))
+    e50 := firstBar ? close : close * kOf(50) + e50 * (1 - kOf(50))
+    fastNow := e5 >= e12 ? 1 : -1
+    slowNow := e34 >= e50 ? 1 : -1
+    fastPrev := si >= 1 ? (pE5 >= pE12 ? 1 : -1) : 0
+    // session VWAP
+    float volNow = volume > 0 ? volume : 1.0
+    pvSum := (firstBar ? 0.0 : pvSum) + (high + low + close) / 3.0 * volNow
+    vSum  := (firstBar ? 0.0 : vSum) + volNow
+    vw := pvSum / vSum
+    // MACD the way the app computes it on the session so far
+    macdLine := e12 - e26
+    float sigNow = si == 0 ? macdLine : macdLine * 0.2 + nz(pSig) * 0.8
+    sigState := si < 25 ? 0.0 : sigNow
+    hist := macdLine - sigNow
+    histRising := si >= 26 and hist > (pLine - pSig)
+    // RSI the way the app computes it (sums for the first 14 changes, then smoothed from those sums)
+    if firstBar
+        gSum := 0.0
+        lSum := 0.0
+    else
+        float chg = close - pC
+        float up = math.max(0.0, chg)
+        float dn = math.max(0.0, -chg)
+        if si <= 14
+            gSum += up
+            lSum += dn
+            if si == 14
+                rsiNow := 100.0 - 100.0 / (1.0 + (gSum / 14.0) / (lSum > 0 ? lSum / 14.0 : 0.000000001))
+        else
+            gSum := (gSum * 13.0 + up) / 14.0
+            lSum := (lSum * 13.0 + dn) / 14.0
+            rsiNow := 100.0 - 100.0 / (1.0 + gSum / (lSum > 0 ? lSum : 0.000000001))
+    // volume against the average of up to 20 candles before this one
+    if firstBar
+        array.clear(vols)
+        array.clear(hi4)
+        array.clear(lo4)
+    float avgV = array.size(vols) > 0 ? array.sum(vols) / math.max(1, math.min(20, si)) : 0.0
+    volR := avgV > 0 ? volume / avgV : 1.0
+    array.push(vols, volume)
+    if array.size(vols) > 20
+        array.shift(vols)
+    // the last four candles, the day's range, the opening range
+    array.push(hi4, high)
+    array.push(lo4, low)
+    if array.size(hi4) > 4
+        array.shift(hi4)
+        array.shift(lo4)
+    swingHi := array.max(hi4)
+    swingLo := array.min(lo4)
+    dayHi := firstBar ? high : math.max(dayHi, high)
+    dayLo := firstBar ? low : math.min(dayLo, low)
+    if firstBar
+        orHi := high
+        orLo := low
+        priorAbove := false
+        priorBelow := false
+    else if si < 3
+        orHi := math.max(orHi, high)
+        orLo := math.min(orLo, low)
+
+// SPY and QQQ moving together (the app's "lead"): the last candle against the one three before it
+leadOne(float c, float c3) => math.abs(c - c3) / c < 0.0005 ? 0 : (c > c3 ? 1 : -1)
+float spyC  = request.security("SPY", "5", close, barmerge.gaps_off, barmerge.lookahead_off)
+float spyC3 = request.security("SPY", "5", close[3], barmerge.gaps_off, barmerge.lookahead_off)
+float qqqC  = request.security("QQQ", "5", close, barmerge.gaps_off, barmerge.lookahead_off)
+float qqqC3 = request.security("QQQ", "5", close[3], barmerge.gaps_off, barmerge.lookahead_off)
+int leadSpy = leadOne(spyC, spyC3)
+int leadQqq = leadOne(qqqC, qqqC3)
+bool isLeader = syminfo.ticker == "SPY" or syminfo.ticker == "QQQ"
+int lead = isLeader or si < 3 or na(spyC3) or na(qqqC3) ? 0 : (leadSpy == leadQqq ? leadSpy : 0)
+
+// ---------------------------------------------------------------- setups found on this candle
+float[]  cScore = array.new_float(0)      // score after the changes
+float[]  cRaw = array.new_float(0)        // score as the scanner gives it
+float[]  cStop = array.new_float(0)       // stop after the changes
+float[]  cRawStop = array.new_float(0)
+float[]  cTarget = array.new_float(0)
+int[]    cDir = array.new_int(0)
+int[]    cStrat = array.new_int(0)        // 0 EMA, 1 VWAP, 2 GEX, 3 opening range
+string[] cName = array.new_string(0)
+
+// the nearest wall ahead of price (rank 0) or the one after it (rank 1)
+wallAhead(int d, int rank) =>
+    float[] ahead = array.new_float(0)
+    float[] walls = array.from(cw, cw2, pw, pw2, zg)
+    for w in walls
+        if not na(w)
+            if (d > 0 ? w > close * 1.0008 : w < close * 0.9992)
+                array.push(ahead, w)
+    array.sort(ahead, order.ascending)
+    int count = array.size(ahead)
+    count > rank ? array.get(ahead, d > 0 ? rank : count - 1 - rank) : float(na)
+
+timeKey() => confirm < 630 ? "time:open" : confirm < 705 ? "time:mid" : confirm < 810 ? "time:lunch" : confirm < 900 ? "time:pm" : "time:close"
+
+// Score one setup exactly as the app does, work out its stop and target, and add it to the lists above.
+rate(int strat, int d, float base, string name) =>
+    float s = base
+    float a = 0.0
+    int trend = slowNow * d
+    if trend > 0
+        s += 8
+    else if trend < 0 and strat != 2
+        s -= 10
+        a += adj("flag:against the 34/50 trend")
+    if (close >= vw ? 1 : -1) == d
+        s += 5
+    else if strat != 1
+        s -= 6
+        a += adj(d > 0 ? "flag:below VWAP" : "flag:above VWAP")
+    int hSign = hist > 0 ? 1 : hist < 0 ? -1 : 0
+    if hSign == d and histRising == (d > 0)
+        s += 7
+    else if hSign == -d and histRising != (d > 0)
+        s -= 7
+        a += adj("flag:MACD disagrees")
+    if not na(rsiNow)
+        if (d > 0 and rsiNow > 75) or (d < 0 and rsiNow < 25)
+            s -= 9
+            a += adj("flag:RSI stretched")
+        else if (d > 0 and rsiNow > 50 and rsiNow < 68) or (d < 0 and rsiNow < 50 and rsiNow > 32)
+            s += 3
+    if volR >= 1.5
+        s += 6
+    else if volR < 0.7
+        s -= 5
+        a += adj("flag:light volume")
+    if lead == d
+        s += 6
+    else if lead == -d
+        s -= 6
+        a += adj("flag:SPY and QQQ moving the other way")
+    // stop: the nearest protective level behind price (recent swing, VWAP, fast cloud), at least 0.12% away
+    float minGap = close * 0.0012
+    float fastEdge = d > 0 ? math.min(e5, e12) : math.max(e5, e12)
+    float swing = d > 0 ? swingLo : swingHi
+    float stopRaw = na
+    float[] prot = array.from(swing, vw, fastEdge)
+    for v in prot
+        if (d > 0 ? v <= close - minGap : v >= close + minGap)
+            stopRaw := na(stopRaw) ? v : (d > 0 ? math.max(stopRaw, v) : math.min(stopRaw, v))
+    if na(stopRaw)
+        stopRaw := close - d * close * 0.0015
+    stopRaw -= d * close * 0.0003
+    // target: the next wall ahead, or the day's high or low
+    float a0 = wallAhead(d, 0)
+    float a1 = wallAhead(d, 1)
+    float tgtRaw = a0
+    if na(tgtRaw)
+        tgtRaw := d > 0 ? math.max(dayHi, close * 1.004) : math.min(dayLo, close * 0.996)
+    if math.abs(tgtRaw - close) < close * 0.0015
+        tgtRaw := na(a1) ? close + d * close * 0.003 : a1
+    float risk = math.abs(close - stopRaw)
+    float reward = math.abs(tgtRaw - close)
+    float rr = reward / (risk > 0 ? risk : 0.000000001)
+    if rr >= 2
+        s += 5
+    else if rr < 1
+        s -= 10
+        a += adj("flag:low reward to risk")
+    if not na(a0) and math.abs(a0 - close) / close < 0.0015 and strat != 2
+        s -= 8
+        a += adj("flag:a GEX wall sits right in front")
+    if confirm >= 705 and confirm < 810
+        s -= 6
+    if confirm >= 940
+        s -= 10
+    if (confirm >= 585 and confirm < 690) or (confirm >= 840 and confirm < 930)
+        s += 3
+    float raw = math.max(0.0, math.min(100.0, math.round(s)))
+    // what INDAI learned: points for the time of day, the kind of setup, the direction, the ticker and each warning
+    string stratKey = strat == 0 ? "ema" : strat == 1 ? "vwap" : strat == 2 ? "gex" : "orb"
+    a += adj(timeKey()) + adj("kind:" + stratKey + "|" + name) + adj(d > 0 ? "dir:1" : "dir:-1") + adj("sym:" + syminfo.ticker)
+    float tuned = math.max(0.0, math.min(100.0, raw + math.max(-15.0, math.min(8.0, a))))
+    stopRaw := math.round(stopRaw, 2)
+    tgtRaw := math.round(tgtRaw, 2)
+    array.push(cScore, tuned)
+    array.push(cRaw, raw)
+    array.push(cRawStop, stopRaw)
+    array.push(cStop, math.round(close - d * math.abs(close - stopRaw) * stopMult, 2))
+    array.push(cTarget, math.round(close + d * math.abs(tgtRaw - close) * tgtMult, 2))
+    array.push(cDir, d)
+    array.push(cStrat, strat)
+    array.push(cName, name)
+    tuned
+
+if inSess and si >= 5
+    // 1. EMA cloud trend: the fast cloud flips with the slow cloud, or a pullback into the fast cloud holds
+    if useEma and si >= 13
+        float cloudLo = math.min(e5, e12)
+        float cloudHi = math.max(e5, e12)
+        bool flipUp = fastNow == 1 and fastPrev == -1 and slowNow == 1
+        bool pullUp = fastNow == 1 and slowNow == 1 and low <= cloudHi and close > cloudHi and close > open
+        if flipUp
+            rate(0, 1, 58.0, "fast EMA cloud flipped bullish")
+        else if pullUp
+            rate(0, 1, 60.0, "pullback held the fast cloud")
+        bool flipDn = fastNow == -1 and fastPrev == 1 and slowNow == -1
+        bool pullDn = fastNow == -1 and slowNow == -1 and high >= cloudLo and close < cloudLo and close < open
+        if flipDn
+            rate(0, -1, 58.0, "fast EMA cloud flipped bearish")
+        else if pullDn
+            rate(0, -1, 60.0, "pullback held the fast cloud")
+    // 2. VWAP reclaim, loss, rejection, bounce
+    if useVwap
+        if pC < pVw and close > vw and volR >= 1.1
+            rate(1, 1, 56.0, "VWAP reclaim")
+        if pC > pVw and close < vw and volR >= 1.1
+            rate(1, -1, 56.0, "lost VWAP")
+        if high >= vw and close < vw and pC < pVw and close < open and (high - math.max(open, close)) > math.abs(close - open)
+            rate(1, -1, 54.0, "VWAP rejection")
+        if low <= vw and close > vw and pC > pVw and close > open and (math.min(open, close) - low) > math.abs(close - open)
+            rate(1, 1, 54.0, "VWAP bounce")
+    // 3. GEX walls (only with levels typed in)
+    if useGex
+        float tol = close * 0.0012
+        if not na(pw) and low <= pw + tol and close > pw and close > open
+            rate(2, 1, 57.0, "bounce off the put wall")
+        if not na(cw) and high >= cw - tol and close < cw and close < open
+            rate(2, -1, 57.0, "rejected at the call wall")
+        if not na(cw) and pC <= cw and close > cw + tol * 0.5 and volR > 1.3
+            rate(2, 1, 55.0, "broke the call wall")
+        if not na(pw) and pC >= pw and close < pw - tol * 0.5 and volR > 1.3
+            rate(2, -1, 55.0, "broke the put wall")
+        if not na(zg) and (pC - zg) * (close - zg) < 0
+            rate(2, close > zg ? 1 : -1, 52.0, "crossed the gamma flip")
+    // 4. Opening range (first 15 minutes) breakout, between 9:45 and 11:30
+    if useOrb and mins >= 585 and mins <= 690
+        if close > orHi and pC <= orHi and not priorAbove and volR > 1.2
+            rate(3, 1, 57.0, "broke the opening range high")
+        if close < orLo and pC >= orLo and not priorBelow and volR > 1.2
+            rate(3, -1, 57.0, "broke the opening range low")
+
+// after this candle: has price already closed beyond the opening range?
+if inSess
+    if si >= 3
+        if close > orHi
+            priorAbove := true
+        if close < orLo
+            priorBelow := true
+    prevClose := close
+
+// ---------------------------------------------------------------- which one alerts: best score, not a repeat, under the hourly limit
+var int[] lastAlert = array.new_int(8, 0)     // per kind of strategy and direction: when it last alerted
+var int[] hourT = array.new_int(0)
+var int nFound = 0
+var int nAlerts = 0
+var int nTaken = 0
+var int nBusy = 0
+var int nQuiet = 0
+var int tradeN = 0
+
+int best = -1
+if inSess and dayOk and mins < 955 and not session.islastbar_regular and array.size(cScore) > 0
+    float bestScore = -1.0
+    for i = 0 to array.size(cScore) - 1
+        float sc = array.get(cScore, i)
+        int slot = array.get(cStrat, i) * 2 + (array.get(cDir, i) > 0 ? 0 : 1)
+        if sc >= scoreLine and sc > bestScore and time_close - array.get(lastAlert, slot) > 20 * 60000
+            best := i
+            bestScore := sc
+
+if best >= 0
+    nFound += 1
+    int d = array.get(cDir, best)
+    int slot = array.get(cStrat, best) * 2 + (d > 0 ? 0 : 1)
+    array.set(lastAlert, slot, time_close)
+    // the alerts-per-hour limit
+    bool trimming = array.size(hourT) > 0
+    while trimming
+        if time_close - array.get(hourT, 0) >= 3600000
+            array.shift(hourT)
+            trimming := array.size(hourT) > 0
+        else
+            trimming := false
+    bool quiet = array.size(hourT) >= perHourIn
+    float score = array.get(cScore, best)
+    float rawScore = array.get(cRaw, best)
+    string name = array.get(cName, best)
+    string scoreText = str.tostring(score, "#") + (score != rawScore ? " (was " + str.tostring(rawScore, "#") + ")" : "")
+    if quiet
+        nQuiet += 1
+        if showLabels
+            label.new(bar_index, d > 0 ? low : high, scoreText + "\nover the hourly limit", style = d > 0 ? label.style_label_up : label.style_label_down, color = color.new(color.gray, 40), textcolor = color.white, size = size.tiny, tooltip = name)
+    else
+        array.push(hourT, time_close)
+        nAlerts += 1
+        bool flat = strategy.position_size == 0
+        if flat
+            nTaken += 1
+            tradeN += 1
+            float rawRisk = math.abs(close - array.get(cRawStop, best))
+            float qty = math.max(1.0, math.floor(riskUsd / (rawRisk > 0 ? rawRisk : close * 0.0015)))
+            string id = "T" + str.tostring(tradeN)
+            strategy.entry(id, d > 0 ? strategy.long : strategy.short, qty = qty, comment = name + " " + str.tostring(score, "#"))
+            strategy.exit(id + "x", id, stop = array.get(cStop, best), limit = array.get(cTarget, best), comment_loss = "stop", comment_profit = "target")
+        else
+            nBusy += 1
+        if showLabels
+            label.new(bar_index, d > 0 ? low : high, scoreText + (flat ? "" : "\nalready in a trade"), style = d > 0 ? label.style_label_up : label.style_label_down, color = flat ? (d > 0 ? color.new(color.teal, 0) : color.new(color.red, 0)) : color.new(color.gray, 20), textcolor = color.white, size = size.small, tooltip = name)
+
+// nothing is carried overnight (the last candle of the session, half days included; and as a safety net the first candle of the next one)
+if inSess and (mins >= 955 or session.islastbar_regular or firstBar) and strategy.position_size != 0
+    strategy.close_all(comment = "close of day")
+
+// ---------------------------------------------------------------- on the chart
+plot(showLines and inSess ? vw : na, "Session VWAP", color = color.new(#dcbf6e, 0), linewidth = 1, style = plot.style_linebr)
+p5 = plot(showLines and inSess ? e5 : na, "EMA 5", color = color.new(color.teal, 60), style = plot.style_linebr)
+p12 = plot(showLines and inSess ? e12 : na, "EMA 12", color = color.new(color.teal, 60), style = plot.style_linebr)
+fill(p5, p12, color = e5 >= e12 ? color.new(color.teal, 80) : color.new(color.red, 80))
+
+var table info = table.new(position.bottom_right, 1, 5, bgcolor = color.new(#0a0e14, 10), border_width = 0)
+if barstate.islast
+    if not is5
+        table.cell(info, 0, 0, "INDAI Backtest needs a 5-minute chart", text_color = color.orange, text_size = size.normal)
+    else
+        table.cell(info, 0, 0, "INDAI · score line " + str.tostring(scoreLine, "#") + (array.size(adjKeys) > 0 ? " · " + str.tostring(array.size(adjKeys)) + " changes applied" : " · scanner as it comes"), text_color = #dcbf6e, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 1, "Alerts " + str.tostring(nAlerts) + " · trades taken " + str.tostring(nTaken), text_color = color.white, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 2, "Skipped: already in a trade " + str.tostring(nBusy) + " · over the hourly limit " + str.tostring(nQuiet), text_color = color.gray, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 3, "All the numbers are in the Strategy Tester tab", text_color = color.gray, text_size = size.small, text_halign = text.align_left)

@@ -66,7 +66,12 @@ export function evalPullback(idea, bars, frac = 1 / 3, waitMin = 10) {
 
 const WINDOWS = [['open', 630, 'First hour (9:30 to 10:30)'], ['mid', 705, 'Mid-morning (10:30 to 11:45)'], ['lunch', 810, 'Lunch window (11:45 to 1:30)'], ['pm', 900, 'Afternoon (1:30 to 3:00)'], ['close', 9999, 'Last hour (3:00 to 4:00)']];
 const plainTitle = (t) => String(t || '').replace(/\s*\d[\d.,]*\s*$/, '').replace(/\s+\d[\d.,]*/g, '').trim();
-const plainFlag = (f) => /reward to risk/.test(f) ? 'low reward to risk' : String(f || '').replace(/\s*\(.*?\)\s*/g, '').replace(/\s+\d[\d.,:]*/g, '').trim();
+// A warning without its changing number: "RSI stretched (78)" and "only 0.7:1 reward to risk" each become one group.
+// (The others keep their words exactly: "against the 34/50 trend", "last 20 minutes".)
+export const plainFlag = (f) => /reward to risk/.test(f) ? 'low reward to risk' : String(f || '').replace(/\s*\(.*?\)\s*/g, '').trim();
+// Days kept by the first version wrote two warnings wrongly; put them right when they are read back.
+const OLD_FLAGS = { 'against the/50 trend': 'against the 34/50 trend', 'last minutes': 'last 20 minutes' };
+const fixFlag = (f) => OLD_FLAGS[f] || f;
 const TIME_FLAGS = new Set(['lunch chop window', 'last 20 minutes']);
 // The groups an idea belongs to: time of day, kind of setup, direction, ticker, each warning it carried, score band.
 export function keysOf(r) {
@@ -185,6 +190,8 @@ const KEEP_DAYS = 20;
 export function initRetro(app) {
   let st = { days: {}, tuning: null, log: [] };
   try { Object.assign(st, JSON.parse(localStorage.getItem(KEY)) || {}); } catch {}
+  for (const d of Object.values(st.days)) for (const r of d.recs || []) if (r.flags) r.flags = r.flags.map(fixFlag);
+  if (st.tuning) for (const k of Object.keys(st.tuning.adj || {})) { const nk = k.startsWith('flag:') ? 'flag:' + fixFlag(k.slice(5)) : k; if (nk !== k) { if (!TIME_FLAGS.has(nk.slice(5))) { st.tuning.adj[nk] = st.tuning.adj[k]; if (st.tuning.labels?.[k]) st.tuning.labels[nk] = st.tuning.labels[k].replace(k.slice(5), nk.slice(5)); } delete st.tuning.adj[k]; delete st.tuning.labels?.[k]; } }
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch {} };
   const tuning = () => st.tuning || NO_TUNING;
   const demo = () => app.feed.status.mode === 'demo';
@@ -238,7 +245,7 @@ export function initRetro(app) {
     const today = buildDay(), kept = demo() ? [] : history().filter(d => !today || d.ymd !== today.ymd);
     const days = today && today.recs.length ? [...kept, today] : kept;
     const plan = app.activePlan();
-    return { today, days, proposal: propose(days, plan.minScore, tuning()), tuning: tuning(), minScore: plan.minScore, log: st.log.slice(-6), demo: demo(), at: Date.now() };
+    return { today, days, proposal: propose(days, plan.minScore, tuning()), tuning: tuning(), minScore: plan.minScore, riskPerTrade: plan.riskPerTrade, log: st.log.slice(-6), demo: demo(), at: Date.now() };
   }
   function apply(proposal) {
     const t = { adj: proposal.adj, labels: proposal.labels, minAdd: proposal.minAdd, stop: proposal.stop, target: proposal.target, at: Date.now(), basis: { ideas: proposal.n, days: proposal.days } };
@@ -269,6 +276,48 @@ export function initRetro(app) {
       app.markDirty('ideabar'); app.markDirty('ideas');
     }
   }, 60e3);
+}
+
+// ---------------------------------------------------------------- back-testing a set of changes on the kept days
+// All the numbers for a list of results, in the order they happened.
+export function metrics(recs, pick = (r) => r.R) {
+  const list = [...recs].sort((a, b) => a.t - b.t), s = summarize(list, pick);
+  let win = 0, loss = 0, eq = 0, peak = 0, dd = 0, run = 0, worstRun = 0;
+  for (const r of list) {
+    const v = pick(r);
+    if (v > 0) win += v; else loss -= v;
+    eq += v; if (eq > peak) peak = eq; if (peak - eq > dd) dd = peak - eq;
+    run = v < 0 ? run + 1 : 0; if (run > worstRun) worstRun = run;
+  }
+  return { ...s, grossWin: r2(win), grossLoss: r2(loss), pf: loss > 0 ? r2(win / loss) : (win > 0 ? Infinity : null), maxDD: r2(dd), losingRun: worstRun };
+}
+// The same days with and without a set of changes: which setups she would still alert on, and how those did
+// with the proposed stop and target distances.
+export function backtest(days, minScore, T) {
+  const gi = Math.max(0, GRID.findIndex(v => v.stop === (T.stop || 1) && v.target === (T.target || 1)));
+  const keep = (recs) => recs.filter(r => tunedScore(r, T) >= minScore + (T.minAdd || 0));
+  const pick = (r) => r.grid?.[gi] ?? r.R;
+  const all = days.flatMap(d => d.recs);
+  return { base: metrics(all), tuned: metrics(keep(all), pick), skipped: metrics(all.filter(r => !keep([r]).length)),
+    perDay: days.map(d => ({ ymd: d.ymd, base: metrics(d.recs), tuned: metrics(keep(d.recs), pick) })) };
+}
+// The fair test: each day is judged with only what she could have learned from the days before it.
+export function walkForward(days, minScore) {
+  const base = [], tuned = []; let judged = 0;
+  for (let i = 1; i < days.length; i++) {
+    const P = propose(days.slice(0, i), minScore);
+    if (!P.ready || !P.why.length) continue;
+    judged++;
+    const gi = Math.max(0, GRID.findIndex(v => v.stop === P.stop && v.target === P.target));
+    for (const r of days[i].recs) { base.push(r); if (tunedScore(r, P) >= minScore + P.minAdd) tuned.push({ ...r, R: r.grid?.[gi] ?? r.R }); }
+  }
+  return judged ? { days: judged, base: metrics(base), tuned: metrics(tuned) } : null;
+}
+// The changes as one line to paste into the TradingView strategy (indai/tradingview/indai-backtest.pine reads it).
+export function tvCode(T) {
+  const parts = [`minadd=${T.minAdd || 0}`, `stop=${T.stop || 1}`, `target=${T.target || 1}`];
+  for (const [k, v] of Object.entries(T.adj || {}).sort()) if (/^(time|kind|dir|sym|flag):/.test(k) && !/[;=]/.test(k)) parts.push(`${k}=${v}`);
+  return parts.join(';');
 }
 
 // ---------------------------------------------------------------- what the Retrospective screen shows
@@ -325,12 +374,13 @@ export function retroHtml(rv, armed = '') {
   else if (sameTuning(P, T)) out.push(`<p class="note">Nothing new. ${Object.keys(T.adj).length || T.minAdd || T.stop !== 1 || T.target !== 1 ? 'What she has learned still fits' : 'Nothing stands out enough to change'} (${nDays}).</p>`);
   else {
     const dropped = Object.keys(T.adj).filter(k => !(k in P.adj)).map(k => T.labels?.[k] || k);
-    const all = rv.days.flatMap(d => d.recs), kept = all.filter(r => tunedScore(r, P) >= rv.minScore + P.minAdd), was = summarize(all), now = summarize(kept);
-    const gi = GRID.findIndex(v => v.stop === P.stop && v.target === P.target), nowLv = summarize(kept, r => r.grid[gi]);
     out.push(`<ul class="rlist changes">${P.why.map(w => `<li><b>${esc(w.text)}</b><span>${esc(w.basis)}</span></li>`).join('')}${dropped.map(d => `<li><b>Stop adjusting: ${esc(d)}</b><span>it no longer stands out</span></li>`).join('')}${!P.why.length ? '<li><b>Go back to the scanner as it comes</b><span>nothing she had learned still stands out</span></li>' : ''}</ul>`);
-    out.push(`<p class="note">On the same ${nDays}: all of them ${was.winRate ?? '—'}% and ${fmtR(was.R)}; with these changes ${now.n} alerted, ${now.winRate ?? '—'}% and ${fmtR(nowLv.R)}. That is on the very days she learned from, so expect less than that going forward. The next retrospectives check it on fresh days.</p>`);
+    out.push(backtestHtml(rv, P, 'Back-test of these changes'));
     out.push(`<div class="pin-actions"><button type="button" class="btn primary" data-retro="apply">Apply these changes</button><button type="button" class="btn" data-retro="keep">Keep things as they are</button></div>`);
   }
+  // with nothing new proposed, the back-test is of what is in force
+  if (!rv.demo && (!P.ready || sameTuning(P, T)) && (Object.keys(T.adj).length || T.minAdd || T.stop !== 1 || T.target !== 1) && rv.days.length) out.push(backtestHtml(rv, T, 'Back-test of what is in force'));
+  if (!rv.demo) out.push(tradingViewHtml(rv, P.ready && !sameTuning(P, T) ? P : T));
   // in force now
   const act = Object.entries(T.adj).sort((x, y) => x[1] - y[1]).map(([k, v]) => `<li><b>${esc(T.labels?.[k] || k)}</b><span>${v > 0 ? '+' : '−'}${Math.abs(v)} points</span></li>`);
   if (T.minAdd) act.push(`<li><b>Alerts start at ${rv.minScore + T.minAdd}</b><span>plan level ${rv.minScore}</span></li>`);
@@ -349,4 +399,42 @@ export function retroQuestion(rv) {
   const f = dayFacts(rv.today.recs), a = f.all;
   const g = (x) => `${x.label.replace(/\s*\(.*?\)/, '')} ${x.W}-${x.L} ${fmtR(x.R)}`;
   return `Retrospective for today. ${a.n} setups: ${a.W} won, ${a.L} lost, ${a.O} open, result ${fmtR(a.R)}. Missed most: ${f.missed.slice(0, 3).map(g).join('; ') || 'nothing stood out'}. Worked: ${f.worked.slice(0, 2).map(g).join('; ') || 'nothing stood out'}. ${f.stt} of ${f.losses} stop-outs went on to the target. What should I take from this for tomorrow? Keep it to a few sentences.`.slice(0, 590);
+}
+
+const money = (v) => `${v < 0 ? '−' : v > 0 ? '+' : ''}$${Math.abs(Math.round(v)).toLocaleString('en-US')}`;
+const pfText = (m) => (m.pf == null ? '—' : m.pf === Infinity ? 'no losses' : m.pf.toFixed(2));
+// All the numbers, side by side: every setup as the scanner scores it, and the ones she would alert on with the changes.
+function backtestHtml(rv, T, title) {
+  const bt = backtest(rv.days, rv.minScore, T), a = bt.base, b = bt.tuned, nDays = rv.days.length;
+  const row = (label, x, y, c = '') => `<tr><th>${label}</th><td>${x}</td><td class="${c}">${y}</td></tr>`;
+  const rows = [
+    row('Setups alerted', a.n, b.n),
+    row('Won – lost – open', `${a.W} – ${a.L} – ${a.O}`, `${b.W} – ${b.L} – ${b.O}`),
+    row('Win rate', a.winRate == null ? '—' : a.winRate + '%', b.winRate == null ? '—' : b.winRate + '%', b.winRate != null && a.winRate != null ? cls(b.winRate - a.winRate) : ''),
+    row('Result', `<b class="${cls(a.R)}">${fmtR(a.R)}</b>`, `<b class="${cls(b.R)}">${fmtR(b.R)}</b>`),
+    row('Average per setup', fmtR(a.avgR), fmtR(b.avgR), cls(b.avgR - a.avgR)),
+    row(`At $${rv.riskPerTrade} a trade`, money(a.R * rv.riskPerTrade), money(b.R * rv.riskPerTrade)),
+    row('Profit factor', pfText(a), pfText(b)),
+    row('Deepest drawdown', fmtR(-a.maxDD), fmtR(-b.maxDD), cls(a.maxDD - b.maxDD)),
+    row('Longest losing run', a.losingRun, b.losingRun, cls(a.losingRun - b.losingRun)),
+  ];
+  const perDay = bt.perDay.slice(-10).reverse().map(d => `<tr><th>${esc(dayLabel(d.ymd))}</th><td>${d.base.n} · ${d.base.winRate ?? '—'}% · ${fmtR(d.base.R)}</td><td class="${cls(d.tuned.R - d.base.R)}">${d.tuned.n} · ${d.tuned.winRate ?? '—'}% · ${fmtR(d.tuned.R)}</td></tr>`).join('');
+  const verdict = b.n < 5 ? 'Too few setups are left to judge it.' : b.R > a.R && b.maxDD <= a.maxDD ? 'On these days the changes made more and drew down less.' : b.R > a.R ? 'On these days the changes made more, with a deeper drawdown on the way.' : b.avgR > a.avgR ? 'On these days the changes made less in total but more per setup, by taking fewer.' : 'On these days the changes did not help. Think twice before applying them.';
+  const wf = walkForward(rv.days, rv.minScore);
+  const fair = wf ? `<p class="note"><b>The fair test.</b> Each day judged with only what she could have learned from the days before it (${wf.days} day${wf.days === 1 ? '' : 's'}): as the scanner scores, ${wf.base.n} setups, ${wf.base.winRate ?? '—'}%, <b class="${cls(wf.base.R)}">${fmtR(wf.base.R)}</b>; with what she had learned by then, ${wf.tuned.n} setups, ${wf.tuned.winRate ?? '—'}%, <b class="${cls(wf.tuned.R)}">${fmtR(wf.tuned.R)}</b>.</p>`
+    : `<p class="note"><b>The fair test</b> (each day judged with only what she learned from earlier days) needs at least two kept days with enough setups before the later one. It is not available yet${nDays > 1 ? '' : ': this is the first day'}.</p>`;
+  return `<h3>${esc(title)}</h3>
+    <table class="rtable"><thead><tr><th></th><td>As the scanner scores</td><td>With the changes</td></tr></thead><tbody>${rows.join('')}</tbody></table>
+    <p class="note">${verdict} These are the ${a.n} setups from the ${nDays} day${nDays === 1 ? '' : 's'} she learned from, so the right-hand column flatters itself: expect less on new days. Skipped by the changes: ${bt.skipped.n} setups, ${bt.skipped.winRate ?? '—'}%, ${fmtR(bt.skipped.R)}.</p>
+    ${nDays > 1 ? `<table class="rtable days"><thead><tr><th>Day by day</th><td>Scanner</td><td>With the changes</td></tr></thead><tbody>${perDay}</tbody></table>` : ''}
+    ${fair}`;
+}
+// Months of real candles and candle-by-candle replay are in TradingView: hand it the changes.
+function tradingViewHtml(rv, T) {
+  const has = Object.keys(T.adj || {}).length || T.minAdd || (T.stop && T.stop !== 1) || (T.target && T.target !== 1);
+  return `<h3>Back-test on months of data, and live simulation</h3>
+    <p class="note">The app only has the days it has kept. TradingView has months of candles, a Strategy Tester with every number (net profit, win rate, profit factor, drawdown, each trade) and Bar Replay, which plays a day forward one candle at a time. The INDAI Backtest strategy is this scanner, line for line, for a 5-minute chart.</p>
+    <ol class="rlist steps"><li>Add the <b>INDAI Backtest</b> strategy to a 5-minute chart (copy the script below into the Pine Editor once and save it).</li><li>${has ? 'Copy the changes and paste them into the strategy’s <b>Changes</b> setting.' : 'Leave the <b>Changes</b> setting empty to test the scanner as it comes.'} Untick <b>Apply the changes</b> to compare.</li><li>Read the <b>Strategy Tester</b> for the numbers. Use <b>Bar Replay</b> to watch it trade a day candle by candle.</li></ol>
+    <div class="pin-actions">${has ? `<button type="button" class="btn primary" data-retro="copycode" data-code="${esc(tvCode(T))}">Copy the changes for TradingView</button>` : ''}<button type="button" class="btn" data-retro="copyscript">Copy the script</button><a class="btn" href="./tradingview/" target="_blank" rel="noopener">Open the script page</a></div>
+    <p class="note">It takes one trade at a time on the ticker and has no GEX levels unless you type them in, so its numbers will not equal the app’s. Send me a screenshot of the Strategy Tester and I will read it with you.</p>`;
 }
