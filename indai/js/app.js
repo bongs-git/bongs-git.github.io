@@ -11,7 +11,7 @@ import { relay } from './relay.js';
 import { bs, yearsTo } from './options.js';
 import { fmtPrice, fmtMoney } from './hud.js';
 import { nearestLevel } from './panels.js';
-import { installRelayGuards } from './demo.js';
+import { installRelayGuards, researchBlocked } from './demo.js';
 import { initViews } from './views.js';
 import { initSheets } from './sheets.js';
 
@@ -77,7 +77,11 @@ const say = (...a) => app.indai.say(...a);
 // hands-free follow-up). Tapping the mic switches back to voice and those come back.
 {
   const ind = app.indai, talk = ind.talk.bind(ind);
-  ind.talk = (opts) => { if (!app._tapTalk && app.inputMode === 'typed') return Promise.resolve(); return talk(opts); };
+  ind.talk = (opts) => { if (!app._tapTalk && app.inputMode === 'typed') return Promise.resolve(); app._quietTalk = !!opts?.quiet; return talk(opts); };
+  // While web research can't run (today's thinking budget is used up, or research is paused after failing),
+  // she doesn't promise to check the news at the end of a quant read.
+  const sayIt = ind.say.bind(ind);
+  ind.say = (text, ...rest) => sayIt(typeof text === 'string' && researchBlocked() ? text.replace(/ Checking the news and today's events now\.$/, '') : text, ...rest);
   // Tapping the mic again (or letting go of the space bar) before saying anything simply closes the mic:
   // no "I didn't catch that", and no listening again straight after.
   const v = ind.voice, listen = v.listen.bind(v);
@@ -317,7 +321,7 @@ app.send = async (text) => {
   if (!text) return;
   firstGesture();
   app.lastAct = Date.now();
-  app.inputMode = 'typed';
+  app.inputMode = 'typed'; app._quietTalk = false;
   const ind = app.indai;
   if (ind.voice.state.listening) ind.voice.cancel();
   ind.voice.stopSpeaking();

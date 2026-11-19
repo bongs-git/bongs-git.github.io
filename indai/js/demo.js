@@ -4,6 +4,10 @@
 //      out: a request that dies (weak signal, Safari sent to the background) must never hold back the next one.
 //   2. a simulated options chain for demo mode, so trade analysis, the deep dive and the calculator
 //      can still be used (and tested) with no connection. Everything it produces is flagged as demo data.
+//   3. care for INDAI's thinking budget. The backend allows her a fixed amount of thinking per New York day.
+//      When it is used up she says so once in plain words and carries on with what still works, and web
+//      research that keeps failing on the backend pauses itself, because every failed try still spends
+//      from that same budget.
 import { relay } from './relay.js';
 import { bs, yearsTo } from './options.js';
 import { etParts, etToMs, isTradingDay, nextTradingDay } from './market.js';
@@ -112,7 +116,76 @@ export function installRelayGuards(app) {
   relay.brainStatus = async () => relayDown() ? { configured: false, error: true } : realStatus();
   const realBrain = relay.brain.bind(relay);
   relay.brain = async (body, pass) => {
-    if (relayDown()) { const e = new Error("I can't reach the INDAI backend right now"); e.code = 'offline'; throw e; }
-    return realBrain(body, pass);
+    if (relayDown()) throw coded('offline', "I can't reach the INDAI backend right now");
+    const mode = body?.mode;
+    if (mode === 'memory' || mode === 'history' || mode === 'profile') return realBrain(body, pass);   // these spend no thinking
+    const talk = mode === 'talk';
+    if (thinkingOut()) return answerWithoutThinking(app, body, talk);
+    if (!talk && researchPaused()) throw coded('paused', 'it is paused until midnight New York time after failing on the backend; Settings turns it back on');
+    try {
+      const res = await realBrain(body, pass);
+      if (care.outUntil || (!talk && care.fails)) { care.outUntil = 0; care.retryAt = 0; care.kind = ''; if (!talk) care.fails = 0; saveCare(); }
+      return res;
+    } catch (e) {
+      if (e.code === 'budget' || e.code === 'rate_limited') {
+        const budget = e.code === 'budget', now = Date.now();
+        care.kind = budget ? 'budget' : 'rate';
+        care.outUntil = budget ? nyMidnight() : now + 10 * 60e3;
+        care.retryAt = budget ? now + 5 * 60e3 : care.outUntil;       // a budget can be raised during the day, so look again now and then
+        saveCare();
+        return answerWithoutThinking(app, body, talk);
+      }
+      if (!talk && researchBroke(e)) {
+        care.fails = (care.fails || 0) + 1;
+        if (care.fails >= 2) care.pauseUntil = nyMidnight();
+        saveCare();
+        if (care.fails >= 2) throw coded('paused', `it has failed ${care.fails} times in a row on the backend, and each failed try still spends today's thinking budget, so it is paused until midnight New York time; Settings turns it back on`);
+        if (e.code === 'parse') throw coded('parse', "the backend's answer came back incomplete");
+      }
+      throw e;
+    }
   };
+}
+
+// ---- thinking budget care ----
+const CARE_KEY = 'indai.web.brain.v1';
+const care = { kind: '', outUntil: 0, retryAt: 0, toldFor: 0, toldAt: 0, fails: 0, pauseUntil: 0 };
+try { Object.assign(care, JSON.parse(localStorage.getItem(CARE_KEY)) || {}); } catch {}
+function saveCare() { try { localStorage.setItem(CARE_KEY, JSON.stringify(care)); } catch {} }
+const coded = (code, message) => { const e = new Error(message); e.code = code; return e; };
+const nyMidnight = () => { const p = etParts(); return etToMs(p.y, p.m, p.d + 1, 0, 0); };
+// A research call that reached the backend and came back broken (or never came back) has usually been paid for.
+const researchBroke = (e) => e.code === 'parse' || e.code === 'upstream' || e.name === 'AbortError' || (!e.code && /^HTTP 5\d\d/.test(e.message || ''));
+const thinkingOut = () => { const now = Date.now(); return now < care.outUntil && now < care.retryAt; };
+const researchPaused = () => Date.now() < care.pauseUntil;
+// True while a trade idea would get no web research, so she doesn't promise to check the news.
+export const researchBlocked = () => thinkingOut() || researchPaused();
+export function brainCare() {
+  const now = Date.now();
+  return { out: now < care.outUntil ? care.kind : '', outUntil: care.outUntil, researchPaused: researchPaused(), pauseUntil: care.pauseUntil, fails: care.fails };
+}
+export function brainRetry() { care.outUntil = 0; care.retryAt = 0; care.kind = ''; saveCare(); }
+export function resumeResearch() { care.fails = 0; care.pauseUntil = 0; saveCare(); }
+
+// Would the built-in matching make sense of this without the thinking brain? (the same test the shared code applies)
+function localGuess(app, text) {
+  const ind = app.indai, words = String(text || '').trim().split(/\s+/).length;
+  if (!ind || words > 7) return false;
+  try { const top = ind.speech.best(text, ind.lexicon()); return !!top && top.score >= (app._quietTalk ? 0.8 : 0.58); } catch { return false; }
+}
+
+function answerWithoutThinking(app, body, talk) {
+  const budget = care.kind === 'budget';
+  if (!talk) throw coded(budget ? 'budget' : 'rate_limited', budget ? "today's thinking budget is used up; it resets at midnight New York time" : 'she has hit her hourly thinking limit; it clears within the hour');
+  // A short, command-like phrase can still be worked out on this device: stay quiet and let the shared code do it.
+  if (localGuess(app, body.question)) throw coded('not_configured', 'thinking is resting');
+  const now = Date.now(), first = care.toldFor !== care.outUntil;
+  // Talk in the room during a hands-free follow-up: one reminder is enough.
+  if (app._quietTalk && !first && now - care.toldAt < 120e3) throw coded('not_configured', 'thinking is resting');
+  care.toldFor = care.outUntil; care.toldAt = now; saveCare();
+  const can = 'I can still rate a trade from the market data, brief you, and run any command.';
+  const spoken = budget
+    ? (first ? `I've used up my thinking budget for today, so I can't talk that one through until it resets at midnight New York time. ${can}` : 'My thinking budget is used up until midnight New York time. I can still rate a trade, brief you, or run a command.')
+    : (first ? `I've hit my hourly limit for thinking things through, so give me a little while. ${can}` : "I'm still at my hourly thinking limit. I can still rate a trade, brief you, or run a command.");
+  return { mode: 'talk', local: true, result: { spoken }, remembered: [] };
 }

@@ -9,6 +9,7 @@ import { fmtPrice, fmtPct, fmtMoney, fmtVol, fmtBig, pct0 } from './hud.js';
 import { nearestLevel, levelSourceLabel, ideaLabel, expLabelDays, RAG_CLASS } from './panels.js';
 import { drawSparkline, drawPayoff } from './chart.js';
 import { $, esc } from './views.js';
+import { brainCare, brainRetry, resumeResearch } from './demo.js';
 
 const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : 'flat');
 // Rebuilding a form while a finger or the mouse is down would swallow the tap in progress (the button it started on
@@ -402,6 +403,7 @@ function initSettings(app) {
     <h3>Research</h3>
     <p class="note">With research on, INDAI also reads today's news, events and sentiment on the web before rating a trade, and can hold a free conversation. The analysis is information, not financial advice.</p>
     <div id="research-status" class="status"></div>
+    <div class="actions" id="research-actions" style="margin-top:10px" hidden><button type="button" id="s-brain-retry" class="btn mini" hidden>Check the budget again</button><button type="button" id="s-research-resume" class="btn mini" hidden>Turn web research back on</button></div>
     <div class="grid2">
       <div><label for="s-depth">Research depth</label><select id="s-depth"><option value="fast">Fast (about 20 seconds)</option><option value="deep">Deep (slower, more thorough)</option></select></div>
       <div><label for="s-rate">Risk-free rate %</label><input id="s-rate" type="number" inputmode="decimal" min="0" max="15" step="0.1"></div>
@@ -467,8 +469,16 @@ function initSettings(app) {
     const tv = app.tvAlerts || [], br = app.feed.status.tvAt, t = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     const bridge = app.feed.status.mode === 'demo' ? 'Bridge: off while INDAI is on demo data.' : br ? (app.feed.bridgeLive ? `<span class="ok">Bridge live</span>: last candle ${t(br)}` : `<span class="warn">Bridge quiet</span> since ${t(br)}`) : 'Bridge: not connected yet (add the INDAI Bridge indicator and its alert).';
     $('tv-status').innerHTML = bridge + '\n' + (tv.length ? `<span class="ok">Connected</span>: ${tv.length} alert${tv.length === 1 ? '' : 's'} in the last two days. Latest: ${esc(String(tv[0].text).slice(0, 120))}` : 'Alerts: none received yet (optional).');
-    const b = ind.brain;
-    $('research-status').innerHTML = !b.checked ? 'Checking…' : b.configured ? `<span class="ok">Research and the thinking brain are on</span>${b.passcode ? ' (passcode required)' : ''}` : b.error ? '<span class="warn">Can\'t reach the INDAI backend right now.</span> She rates trades from market data alone until it is back.' : '<span class="warn">Research is off.</span> It turns on once the Anthropic API key is saved in the INDAI backend. Until then INDAI rates trades from the market data alone and answers with her built-in commands.';
+    const b = ind.brain, care = brainCare();
+    let rs = !b.checked ? 'Checking…' : b.configured ? `<span class="ok">Research and the thinking brain are on</span>${b.passcode ? ' (passcode required)' : ''}` : b.error ? '<span class="warn">Can\'t reach the INDAI backend right now.</span> She rates trades from market data alone until it is back.' : '<span class="warn">Research is off.</span> It turns on once the Anthropic API key is saved in the INDAI backend. Until then INDAI rates trades from the market data alone and answers with her built-in commands.';
+    if (b.configured && care.out === 'budget') rs = '<span class="warn">Today\'s thinking budget is used up.</span> It resets at midnight New York time. Until then INDAI rates trades from the market data alone and answers with her built-in commands.';
+    else if (b.configured && care.out === 'rate') rs = '<span class="warn">INDAI has hit her hourly thinking limit.</span> It clears within the hour.';
+    if (b.configured && care.researchPaused && !care.out) rs = '<span class="ok">The thinking brain is on</span>';
+    if (b.configured && care.researchPaused) rs += `\n<span class="warn">Web research is paused until midnight New York time.</span> It failed ${care.fails} times in a row on the backend, and each failed try still spends the thinking budget.`;
+    const rEl = $('research-status');
+    if (rEl.dataset.html !== rs) { rEl.dataset.html = rs; rEl.innerHTML = rs; }
+    $('s-brain-retry').hidden = care.out !== 'budget'; $('s-research-resume').hidden = !care.researchPaused;
+    $('research-actions').hidden = care.out !== 'budget' && !care.researchPaused;
     const nb = $('s-notify');
     nb.hidden = !('Notification' in window);
     if ('Notification' in window) nb.textContent = Notification.permission === 'granted' ? 'Background notifications are on' : Notification.permission === 'denied' ? 'Notifications are blocked in the browser' : 'Notify me when INDAI is in the background';
@@ -529,6 +539,8 @@ function initSettings(app) {
   $('s-mic-test').addEventListener('click', async () => { const r = await app.primeMic(); toast(r === 'denied' ? 'Microphone is blocked for this site. Allow it in the browser settings.' : r === 'unavailable' ? 'This browser has no microphone access.' : 'Microphone allowed'); });
   $('s-fh-show').addEventListener('click', (e) => { const el = $('s-fh'); el.type = el.type === 'password' ? 'text' : 'password'; e.target.textContent = el.type === 'password' ? 'Show' : 'Hide'; });
   $('s-selftest').addEventListener('click', () => { delete body.dataset.open; app.indai.voice.unlock(); app.indai.selfTest(); });
+  $('s-brain-retry').addEventListener('click', () => { brainRetry(); toast('Ask her something and she will try her thinking brain again'); updateStatus(); });
+  $('s-research-resume').addEventListener('click', () => { resumeResearch(); toast('Web research is back on for your next trade idea'); updateStatus(); });
   $('s-forget-speech').addEventListener('click', (e) => {
     const b = e.currentTarget;
     if (b.dataset.armed) { app.indai.speech.forgetAll(); delete b.dataset.armed; b.textContent = 'Forget learned speech fixes'; toast('Speech fixes cleared'); updateStatus(); return; }
