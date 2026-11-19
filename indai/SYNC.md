@@ -55,9 +55,11 @@ Headset-only calls are answered politely instead of doing anything: `setScene`, 
 - Typed commands do not open the microphone by themselves; tapping the mic brings hands-free follow-ups back.
 - A typed command during the morning check-in runs as a command instead of being taken as the answer.
 - In demo mode the option chain is simulated from the demo prices (the Quest app shows a "couldn't load the chain" message offline).
-- If the app fell back to demo prices because the network was down, it retries and switches back to real data by itself.
+- If the app fell back to demo prices because the network was down, it retries and switches back to real data by itself. The fail-fast switch in `demo.js` only applies while on demo prices; on real data every request goes out.
 - The automatic morning check-in waits until the mic is closed and nothing is open before she starts asking.
 - Undo also takes back a cooldown that the undone loss started; a calculator opened for a ticker with no price yet snaps its strike to the chain.
 - Levels in demo mode are always the simulated ones, so they match the simulated prices.
 - The service worker also keeps the voice runtime (`voice-worker.js`, `vendor/ort`) in a cache of its own. `sync.sh` renames that cache when those files change.
+- The chart and lead/lag fit the session so far (with room to the right) instead of always drawing the full 9:30 to 4:00 width, and chart labels move aside rather than overlap.
+- Coming back to the app, or getting signal back, pulls fresh prices at once; a failed quote pull is retried within seconds.
 - Safari and iOS always listen with the on-device model on WebAssembly (no browser speech recognition, no WebGPU), unless "Browser speech recognition" is picked in Settings.
