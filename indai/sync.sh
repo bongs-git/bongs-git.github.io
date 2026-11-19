@@ -12,10 +12,13 @@ SRC="${1:-$HERE/../../jarvis-command-center}"
 [ -f "$SRC/js/indai.js" ] || { echo "Can't find the source repo at: $SRC" >&2; echo "Usage: ./sync.sh /path/to/jarvis-command-center" >&2; exit 1; }
 
 SHARED_JS="relay.js feeds.js market.js analysis.js options.js signals.js store.js indai.js voice.js speech.js"
-changed=0
+changed=0; voice_changed=0
 copy() { # copy <from> <to>
   mkdir -p "$(dirname "$2")"
-  if ! cmp -s "$1" "$2"; then cp "$1" "$2"; echo "updated  ${2#$HERE/}"; changed=$((changed + 1)); fi
+  if ! cmp -s "$1" "$2"; then
+    cp "$1" "$2"; echo "updated  ${2#$HERE/}"; changed=$((changed + 1))
+    case "$2" in *voice-worker.js|*/vendor/ort/*) voice_changed=1;; esac
+  fi
 }
 for f in $SHARED_JS; do copy "$SRC/js/$f" "$HERE/js/$f"; done
 copy "$SRC/js/workers/voice-worker.js" "$HERE/js/workers/voice-worker.js"
@@ -27,6 +30,11 @@ SHA="$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo unknown)"
 DATE="$(date -u +%Y-%m-%d)"
 if [ -f "$HERE/SYNC.md" ]; then
   sed -i.bak -E "s|^Synced at commit: .*|Synced at commit: \`$SHA\` ($DATE)|" "$HERE/SYNC.md" && rm -f "$HERE/SYNC.md.bak"
+fi
+# The service worker keeps the voice runtime in a cache named after the commit it came from: rename it when those files change.
+if [ "$voice_changed" = 1 ]; then
+  sed -i.bak -E "s|^const VOICE = 'indai-web-voice-[^']*';|const VOICE = 'indai-web-voice-${SHA:0:7}';|" "$HERE/sw.js" && rm -f "$HERE/sw.js.bak"
+  echo "updated  sw.js (voice cache name)"
 fi
 echo "$changed file(s) updated from $SHA"
 

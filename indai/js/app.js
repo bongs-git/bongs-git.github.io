@@ -56,7 +56,7 @@ app.levels = parseLevels(app.settings.levelsText);
 app.feed = new MarketFeed(app.settings);
 installRelayGuards(app);
 app.indai = new Indai(app);
-app.saveSettings = () => saveSettings(app.settings);
+app.saveSettings = () => saveSettings(app.forceDemo ? { ...app.settings, dataMode: app.savedDataMode } : app.settings);   // ?demo=1 is for this visit only
 const say = (...a) => app.indai.say(...a);
 
 // Safari and every iOS browser: the built-in speech recognizer is unreliable there, and WebGPU can't be assumed.
@@ -270,13 +270,17 @@ app.undoTrade = () => {
   let trailing = 0; for (let i = d.trades.length - 1; i >= 0 && d.trades[i].amt < 0; i--) trailing++;
   d.consec = trailing % r.maxConsecLosses;
   d.tripped = -d.pnl >= r.maxDailyLoss;
-  if (t.amt < 0 && d.cooldownUntil > Date.now() && trailing < r.maxConsecLosses) d.cooldownUntil = 0;   // the loss that started the cooldown was taken back
+  if (t.amt < 0 && d.cooldownUntil > Date.now() && (trailing + 1) % r.maxConsecLosses === 0) d.cooldownUntil = 0;   // the loss that started the cooldown was taken back
   say(`Removed the last trade (${t.amt >= 0 ? '+' : '−'}${fmtMoney(Math.abs(t.amt))}). Day P&L ${fmtMoney(d.pnl, true)}.`, 'info', { speak: false });
   persistDay();
 };
 app.setStep = (dir) => {
-  const i = STEPS.indexOf(app.day.step);
-  app.day.step = STEPS[Math.max(0, Math.min(STEPS.length - 1, (i < 0 ? 2 : i) + dir))];
+  const cur = app.day.step, i = STEPS.indexOf(cur);
+  let j;
+  if (i >= 0) j = i + dir;
+  else if (dir > 0) { j = STEPS.findIndex(v => v > cur); if (j < 0) j = STEPS.length - 1; }      // a typed amount (say $600) steps to the next preset
+  else { j = 0; for (let k = 0; k < STEPS.length; k++) if (STEPS[k] < cur) j = k; }
+  app.day.step = STEPS[Math.max(0, Math.min(STEPS.length - 1, j))];
   persistDay();
 };
 app.setStepValue = (v) => { v = Math.round(Number(v)); if (v > 0 && v <= 100000) { app.day.step = v; persistDay(); } };
@@ -301,6 +305,7 @@ app.firstGesture = firstGesture;
 // Tap the mic: talk to INDAI (tap again to stop early).
 app.talk = () => {
   firstGesture();
+  app.lastAct = Date.now();
   app.inputMode = 'voice';
   if (app.indai.voice.state.listening) app._userStop = Date.now();
   app._tapTalk = true;
@@ -311,6 +316,7 @@ app.send = async (text) => {
   text = String(text || '').replace(/\s+/g, ' ').trim();
   if (!text) return;
   firstGesture();
+  app.lastAct = Date.now();
   app.inputMode = 'typed';
   const ind = app.indai;
   if (ind.voice.state.listening) ind.voice.cancel();
@@ -398,6 +404,7 @@ app.nearestExpiry = nearestExpiry;
 app.loadCalc = ({ sym, spot, legs, expirations, strikes }) => {
   app.calc = { sym, spot, legs: legs.map(l => ({ ...l })), expirations: expirations || null, strikes: strikes || null, loading: false };
   autoAnalysis = true; queueMicrotask(() => { autoAnalysis = false; });   // indai.js opens the analysis right after this
+  if (app.analysis && app.analysis.demo == null) app.analysis.demo = app.feed.status.mode === 'demo';
   calcChanged({ chain: false });
 };
 app.ensureCalc = (sym) => {
@@ -407,7 +414,7 @@ app.ensureCalc = (sym) => {
   const spot = q?.last ?? 100;
   const step = strikeStep(sym, spot);
   const leg = { type: 'C', side: 1, strike: Math.round(spot / step) * step, qty: 1, entry: 1, iv: q?.iv30 ? q.iv30 / 100 : 0.2, expiry: nearestExpiry() };
-  app.calc = { sym, spot, legs: [leg], expirations: null, strikes: null, loading: false };
+  app.calc = { sym, spot, legs: [leg], expirations: null, strikes: null, loading: false, needsSnap: !q };   // no price yet: the strike is a placeholder
   repriceModel(leg);
   app.calcFromChain({ quiet: true });
   return app.calc;
@@ -455,6 +462,7 @@ app.calcFromChain = async ({ quiet = false } = {}) => {
       if (!ch || !ch.spot) throw new Error(ch?.error || 'no chain');
       c.expirations = ch.expirations; c.spot = ch.spot; c.demo = !!ch.demo;
       c.strikes = [...new Set(ch.chain.map(o => o.strike))].sort((a, b) => a - b);
+      if (c.needsSnap && c.strikes.length) { c.needsSnap = false; for (const leg of c.legs) { leg.strike = c.strikes.reduce((b, k) => Math.abs(k - ch.spot) < Math.abs(b - ch.spot) ? k : b, c.strikes[0]); repriceModel(leg); } }
       for (const leg of c.legs.filter(l => l.expiry === exp)) {
         if (ch.expiry !== exp) leg.expiry = ch.expiry;
         const row = ch.chain.find(o => o.type === leg.type && o.strike === leg.strike);
@@ -503,7 +511,7 @@ app.lockPlan = ({ quiet = false } = {}) => {
   if (!quiet) say(`Plan locked: starting with ${fmtMoney(d.capital)}, goal ${fmtMoney(d.goal)}, ${p.label.toLowerCase()}. About ${fmtMoney(p.riskPerTrade)} risk per trade, and the breaker trips at minus ${fmtMoney(p.maxLoss)}. ${p.winsNeeded ? `That's roughly ${p.winsNeeded} good trade${p.winsNeeded > 1 ? 's' : ''} at ${p.rr} to 1.` : ''} I'll call out ${d.strategies.map(k => STRATEGIES[k].short).join(', ')} setups scoring ${p.minScore} or better.${p.warnings[0] ? ' ' + p.warnings[0] : ''}`, 'good');
 };
 // Open the plan editor (by hand). The spoken check-in goes through indai.startDay().
-app.openPlan = () => { app.planDraft = defaultDraft(); app.ui.openSheet('plan'); if (!app.temp) app.checkTemperature(); };
+app.openPlan = () => { if (!app.indai.awaiting) app.planDraft = defaultDraft(); app.ui.openSheet('plan'); if (!app.temp) app.checkTemperature(); };
 app.checkTemperature = async (force = false) => {
   if (app.tempLoading) return app.temp;
   if (app.temp && !force && Date.now() - app.temp.at < 10 * 60e3) return app.temp;
@@ -526,7 +534,17 @@ function maybeCheckIn() {
   const p = etParts();
   if (!isTradingDay(p.y, p.m, p.d) || p.h < 6 || p.h >= 16) return;
   app.checkInStarted = true;
-  setTimeout(() => { if (!app.day.plan && !app.indai.awaiting && !app.indai.thinking) app.indai.startDay({ voice: false }); }, 900);
+  // Never talk over what the person is doing: wait until the mic is closed, nothing is open and nothing was just asked.
+  let tries = 0;
+  const go = () => {
+    if (app.day.plan || app.indai.awaiting) return;
+    const vs = app.indai.voice.state;
+    const busy = vs.listening || vs.transcribing || vs.speaking || app.indai.thinking || app.focus || document.hidden
+      || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '') || Date.now() - (app.lastAct || 0) < 6000;
+    if (busy) { if (++tries < 60) setTimeout(go, 2500); else app.checkInStarted = false; return; }
+    app.indai.startDay({ voice: false });
+  };
+  setTimeout(go, 1200);
 }
 app.maybeCheckIn = maybeCheckIn;
 
@@ -588,8 +606,17 @@ function fireSignal(sig, plan, { practice = false } = {}) {
   say(text, sig.dir > 0 ? 'good' : 'risk');
   flash('watch'); if (sig.sym === app.settings.main) flash('chart');
   app.markDirty('indai'); app.markDirty('summary'); app.markDirty('today');
-  try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification(`INDAI · ${sig.sym} ${side} setup (${sig.score})`, { body: `${sig.title}. ${k.strike}${sig.type} ≈ $${k.premium.toFixed(2)} × ${k.qty}. Stop ${fmtPrice(sig.stop)}, target ${fmtPrice(sig.target)}.`, icon: './icons/icon-192.png', tag: 'indai-' + sig.sym }); } catch {}
+  if (document.hidden) notify(`INDAI · ${sig.sym} ${side} setup (${sig.score})`, { body: `${sig.title}. ${k.strike}${sig.type} ≈ $${k.premium.toFixed(2)} × ${k.qty}. Stop ${fmtPrice(sig.stop)}, target ${fmtPrice(sig.target)}.`, icon: './icons/icon-192.png', tag: 'indai-' + sig.sym });
 }
+// Android Chrome only allows notifications through the service worker; desktop browsers accept either.
+async function notify(title, opts) {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg && reg.showNotification) await reg.showNotification(title, opts); else new Notification(title, opts);
+  } catch { try { new Notification(title, opts); } catch {} }
+}
+app.notify = notify;
 app.fireSignal = fireSignal;
 
 // Replay the setup scanner over the current (or last) session's candles: how many alerts your plan would have fired.
@@ -657,6 +684,7 @@ app.openFocus = (id) => {
   if (id === 'scenes') { app.setScene(); return; }
   if (!SHEETS.includes(id)) return;
   if (id === 'calc') app.ensureCalc();
+  if (id === 'deep' && app.deep && app.deep.demo == null) app.deep.demo = app.feed.status.mode === 'demo';
   const compact = !app.ui.sideBySide();
   // On a phone or tablet the verdict and the check-in stay in the conversation (pinned card) instead of covering it.
   if (compact && id === 'analysis' && autoAnalysis) { app.markDirty('indai'); return; }
@@ -753,6 +781,7 @@ function restartFeed() {
   app.markDirty('all');
 }
 app.applySettings = (prev) => {
+  app.forceDemo = false;                       // the person just chose the data mode themselves
   app.levels = parseLevels(app.settings.levelsText);
   app.saveSettings();
   const changed = !prev || prev.f !== app.settings.finnhubKey || prev.syms !== app.settings.symbols.join(',') || prev.mode !== app.settings.dataMode;
@@ -782,7 +811,7 @@ function frame(now) {
 app.redraw = schedule;
 
 const FEED_VIEWS = ['watch', 'chart', 'leadlag', 'levels', 'top', 'summary', 'deep', 'calc', 'today'];
-let lastFeedRev = -1, lastMode = null, ticks = 0, lastGex = 0, lastTV = 0, lastScan = 0, lastBridge = 0;
+let lastFeedRev = -1, lastMode = null, lastSecond = 0, lastGex = 0, lastTV = 0, lastScan = 0, lastBridge = 0;
 function tick() {
   const now = Date.now();
   if (app.feed.rev !== lastFeedRev) { lastFeedRev = app.feed.rev; FEED_VIEWS.forEach(id => app.dirty.add(id)); schedule(); }
@@ -791,7 +820,8 @@ function tick() {
     if (was && lastMode === 'demo' && was !== 'demo') say("I couldn't reach market data, so these are demo prices for now. Everything still works for practice.", 'alert', { speak: false });
     app.markDirty('all');
   }
-  if (++ticks % 4) return;
+  if (now - lastSecond < 950) return;
+  lastSecond = now;
   app.markDirty('top');
   const rs = app.riskState().state;
   if (rs === 'cooldown' || rs !== tick.rs) { tick.rs = rs; app.markDirty('risk'); }
@@ -814,6 +844,7 @@ async function reconnect() {
   } catch { return; }
   if (app.feed.status.mode !== 'demo') return;
   restartFeed();
+  relay.brainStatus().then(b => { app.indai.brain = { ...b, checked: true }; app.markDirty('indai'); app.markDirty('settings'); });
   say('Market data is back. Switching from demo prices to real ones.', 'good', { speak: false });
 }
 window.addEventListener('online', () => setTimeout(reconnect, 1500));
@@ -821,7 +852,7 @@ window.addEventListener('online', () => setTimeout(reconnect, 1500));
 // ------------------------------------------------------------------ boot
 async function boot() {
   const qp = new URLSearchParams(location.search);
-  if (qp.get('demo') === '1') app.settings.dataMode = 'demo';
+  if (qp.get('demo') === '1' && app.settings.dataMode !== 'demo') { app.savedDataMode = app.settings.dataMode; app.settings.dataMode = 'demo'; app.forceDemo = true; }
   if (qp.get('nocheckin') === '1') app.noAutoCheckIn = true;
   app.ui = initViews(app);
   initSheets(app);
@@ -836,15 +867,17 @@ async function boot() {
     : `Hi ${app.settings.name}, I'm INDAI. Market data is connecting (delayed about 15 minutes).`, 'info', { speak: false });
   say('Ask me about a trade, like “QQQ calls expiring today, 665 strike”. Tap the mic, hold the space bar, or just type.', 'info', { speak: false });
   // audio is only allowed after a tap or key press: unlock it on the first one
-  const first = () => { const v = app.indai.voice; if (!firstGesture.done) firstGesture(); else if (v.ctx && v.ctx.state !== 'running') v.unlock(); };
-  window.addEventListener('pointerdown', first, { passive: true });
-  window.addEventListener('keydown', first);
+  // (a touch only counts as a user action when the finger lifts, so listen for the end of the tap)
+  const first = () => { const v = app.indai.voice; if (!firstGesture.done) firstGesture(); else { if (v.ctx && v.ctx.state !== 'running') v.unlock(); maybeCheckIn(); } };
+  for (const ev of ['pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(ev, first, { passive: true });
   // keyboard push-to-talk: hold the space bar (when not typing in a field)
   const typing = () => /INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable;
   window.addEventListener('keydown', (ev) => { if (ev.code === 'Space' && !ev.repeat && !typing()) { ev.preventDefault(); if (!app.indai.listening) app.talk(); } });
   window.addEventListener('keyup', (ev) => { if (ev.code === 'Space' && !typing() && app.indai.voice.state.listening) { app._userStop = Date.now(); app.indai.voice.stop(); } });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); tick(); if (Date.now() - lastProbe > 8000) reconnect(); } });
   if (document.fonts?.ready) document.fonts.ready.then(() => app.markDirty('all'));
+  // another tab (or the Quest app in this same browser) logged a trade or locked a plan: pick it up
+  window.addEventListener('storage', (e) => { if (e.key === 'jarvis.day.v1') { app.day = loadDay(); if (!app.indai.awaiting) app.planDraft = defaultDraft(); app.markDirty('all'); } });
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') && qp.get('nosw') !== '1') {
     // The service worker switches on multi-core voice processing. The first time it takes over, reload once (only during start-up).

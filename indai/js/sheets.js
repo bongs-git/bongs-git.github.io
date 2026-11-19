@@ -11,12 +11,19 @@ import { drawSparkline, drawPayoff } from './chart.js';
 import { $, esc } from './views.js';
 
 const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : 'flat');
+// Rebuilding a form while a finger or the mouse is down would swallow the tap in progress (the button it started on
+// is gone by the time it ends). afterPointer(fn) runs fn now, or right after the press finishes.
+let pointerDown = false; const queued = new Set();
+window.addEventListener('pointerdown', () => { pointerDown = true; }, { capture: true, passive: true });
+for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, () => { pointerDown = false; if (queued.size) setTimeout(() => { const q = [...queued]; queued.clear(); q.forEach(f => f()); }, 0); }, { capture: true, passive: true });
+const afterPointer = (fn) => { if (pointerDown) queued.add(fn); else fn(); };
+const focusKey = (el) => !el || !el.dataset ? null : el.id ? '#' + el.id : el.dataset.step ? `[data-step="${el.dataset.step}"][data-dir="${el.dataset.dir}"]` : el.dataset.field ? `[data-field="${el.dataset.field}"]` : el.dataset.aggr ? `[data-aggr="${el.dataset.aggr}"]` : el.dataset.strat ? `[data-strat="${el.dataset.strat}"]` : el.dataset.act ? `[data-act="${el.dataset.act}"]` : null;
 const kv = (rows) => `<div class="kv">${rows.map(([l, v, s]) => `<div><span>${esc(l)}</span><b${s ? ' class="s"' : ''}>${esc(v)}</b></div>`).join('')}</div>`;
 
 export function initSheets(app) {
   const ind = app.indai, V = app.views;
   const open = (id) => () => app.focus === id && !document.hidden;
-  const demoNote = () => app.feed.status.mode === 'demo' ? '<p class="note warn">Demo data: prices, option quotes and levels are simulated. Practice only.</p>' : '';
+  const demoNote = (demo) => demo ? '<p class="note warn">Demo data: prices, option quotes and levels are simulated. Practice only.</p>' : '';
 
   // ------------------------------------------------------------ analysis: the verdict card
   let anKey = '';
@@ -26,11 +33,11 @@ export function initSheets(app) {
       const an = app.analysis, body = $('sb-analysis');
       $('st-analysis').textContent = an ? `INDAI analysis · ${ideaLabel(an.idea)}` : 'INDAI analysis';
       if (!an) { anKey = ''; body.innerHTML = '<p class="empty">Ask INDAI about a trade, for example “QQQ calls expiring today, 665 strike”. She pulls the chain, flow, charts and levels, and rates it red, amber or green.</p>'; return; }
-      const key = [an.at, !!an.final, an.pendingAI, an.aiError, app.feed.status.mode].join('|');
+      const key = [an.at, !!an.final, an.pendingAI, an.aiError, an.demo].join('|');
       if (key === anKey) return; anKey = key;
       const rag = an.final?.rag || an.score.rag, k = an.contract, q = an.quant;
       const rows = [
-        ['Underlying', `${fmtPrice(an.spot)}${app.feed.status.mode === 'demo' ? ' (demo)' : an.delayed ? ' (delayed)' : ''}`],
+        ['Underlying', `${fmtPrice(an.spot)}${an.demo ? ' (demo)' : an.delayed ? ' (delayed)' : ''}`],
         ['Option bid / ask', k ? `${k.bid.toFixed(2)} / ${k.ask.toFixed(2)}  (mid ${k.mid.toFixed(2)})` : `model ${q.entry.toFixed(2)}`],
         ['IV · volume · OI', `${(q.iv * 100).toFixed(1)}% · ${k ? fmtVol(k.vol) : '—'} · ${k ? fmtVol(k.oi) : '—'}`],
         ['Breakeven at expiry', `${fmtPrice(q.breakeven)} (${q.moveNeededSigma.toFixed(2)}σ away)`],
@@ -50,9 +57,9 @@ export function initSheets(app) {
       const news = an.final?.news?.length ? an.final.news : an.news || [];
       const fin = an.final;
       body.innerHTML = `<div class="cols two"><div>
-          <div class="rag ${RAG_CLASS[rag] || ''}"><b>${esc(rag)}</b><span class="score">${an.score.score}/100</span><span class="how">${fin ? `With web research · ${fin.confidence ?? '—'}% confident` : an.pendingAI ? 'Quant read · researching the news…' : 'Quant read from market data'}</span></div>
+          <div class="rag ${RAG_CLASS[rag] || ''}"><b>${esc(rag)}</b><span class="score">${an.score.score}/100</span><span class="how">${fin ? `With web research · ${esc(fin.confidence ?? '—')}% confident` : an.pendingAI ? 'Quant read · researching the news…' : 'Quant read from market data'}</span></div>
           ${an.score.gate ? `<p class="gate">${esc(an.score.gate)}</p>` : ''}
-          ${demoNote()}
+          ${demoNote(an.demo)}
           <div style="margin-top:10px">${kv(rows)}</div>
           <div class="actions"><button type="button" class="btn primary" data-act="calc">Open calculator</button><button type="button" class="btn" data-act="again">Say it again</button></div>
         </div><div>
@@ -84,7 +91,7 @@ export function initSheets(app) {
         const un = ch?.unusual?.length ? `<p class="sec-title">Unusual options activity</p><div class="unusual">${ch.unusual.slice(0, 5).map(u => `<span class="${u.type === 'C' ? 'up' : 'down'}">${esc(u.exp.slice(5))} ${u.strike}${u.type}  vol ${fmtVol(u.vol)} vs OI ${fmtVol(u.oi)}  ${fmtBig(u.premium)}</span>`).join('')}</div>` : '';
         const nw = d.news?.length ? `<p class="sec-title" style="margin-top:16px">Headlines</p><ul class="news">${d.news.slice(0, 6).map(n => `<li class="${esc(n.sentiment || '')}">${esc(n.title)}</li>`).join('')}</ul>` : '';
         body.innerHTML = `<div class="dd-top"><span class="px mono" id="dd-px">—</span><canvas id="dd-spark"></canvas><span class="pc" id="dd-pc">&nbsp;</span></div>
-          ${demoNote()}
+          ${demoNote(d.demo)}
           <div class="cols two"><div>${rows.length ? kv(rows) : ''}${d.loading ? '<p class="note warn" style="margin-top:10px">Loading options and news…</p>' : !rows.length ? '<p class="empty">No intraday data for this ticker yet.</p>' : ''}</div>
           <div>${un}${nw}${!un && !nw && !d.loading ? '<p class="note">No unusual options prints or headlines right now.</p>' : ''}</div></div>
           <div class="actions"><button type="button" class="btn up" id="dd-calls">Analyze ${esc(d.sym)} calls</button><button type="button" class="btn down" id="dd-puts">Analyze ${esc(d.sym)} puts</button><button type="button" class="btn" id="dd-main">Put on main chart</button><button type="button" class="btn" id="dd-tv">Open in TradingView</button></div>`;
@@ -116,7 +123,7 @@ export function initSheets(app) {
           <p><span class="pill ${rs.state === 'tripped' ? 'risk' : rs.state === 'cooldown' ? 'alert' : 'good'}">${rs.state === 'tripped' ? 'Breaker tripped' : rs.state === 'cooldown' ? 'Cooldown' : 'Breaker armed'}</span></p>
           <p style="margin:10px 0 16px;font-size:15px">Day P&amp;L <b class="mono ${cls(app.day.pnl)}">${fmtMoney(app.day.pnl, true)}</b> · ${fmtMoney(rs.room)} of room</p>
           ${app.day.plan ? `<p class="note" style="margin-bottom:16px">Plan: ${fmtMoney(app.day.plan.capital)} start, ${fmtMoney(app.day.plan.goal)} goal, ${esc(PROFILES[app.day.plan.aggr].label.toLowerCase())}${app.day.goalHit ? ' · goal hit' : ''}</p>` : ''}
-          ${an ? `<p><span class="pill ${RAG_CLASS[rag] || ''}">${rag}</span> <b style="font-weight:600;margin-left:6px">${esc(ideaLabel(an.idea))}</b></p><p class="note" style="margin:8px 0 16px">${esc(an.final?.headline || an.score.cons[0]?.note || an.score.pros[0]?.note || '')}</p>` : ''}
+          ${an ? `<p><span class="pill ${RAG_CLASS[rag] || ''}">${esc(rag)}</span> <b style="font-weight:600;margin-left:6px">${esc(ideaLabel(an.idea))}</b></p><p class="note" style="margin:8px 0 16px">${esc(an.final?.headline || an.score.cons[0]?.note || an.score.pros[0]?.note || '')}</p>` : ''}
           ${lv ? `<p class="note">${esc(main)} walls: call ${lv.cw ?? '—'} · put ${lv.pw ?? '—'} · flip ${lv.zg ?? '—'}</p>` : ''}
         </div></div>`;
     },
@@ -132,7 +139,9 @@ export function initSheets(app) {
       const locked = app.day.plan && app.day.plan.capital === d.capital && app.day.plan.goal === d.goal && app.day.plan.aggr === d.aggr && app.day.plan.strategies.join() === d.strategies.join();
       const key = JSON.stringify([d, tmp && tmp.at, app.tempLoading, locked]);
       if (key === planKey || planBody.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+      if (pointerDown) { afterPointer(replan); return; }
       planKey = key;
+      const keep = planBody.contains(document.activeElement) ? focusKey(document.activeElement) : null;
       const tc = !tmp ? '' : tmp.label.toLowerCase();
       const temp = tmp ? `<div class="temp ${tc}"><div class="t-head"><b>${esc(tmp.label)}</b><span class="${tmp.bias === 'bullish' ? 'up' : tmp.bias === 'bearish' ? 'down' : 'flat'}">${esc(tmp.bias)} lean</span></div><ul>${tmp.notes.slice(0, 6).map(n => `<li>${esc(n)}</li>`).join('')}</ul><p>${esc(tmp.advice)}</p>${tmp.demo ? '<p class="note warn" style="font-weight:500;margin-top:6px">From demo data.</p>' : ''}</div>`
         : `<div class="temp"><div class="t-head"><b style="font-size:18px;color:var(--dim)">${app.tempLoading ? 'Reading the market…' : 'Market temperature not checked yet'}</b></div></div>`;
@@ -157,8 +166,10 @@ export function initSheets(app) {
           <p class="note${p.warnings[0] ? ' warn' : ''}" style="margin-top:10px">${esc(p.warnings[0] || PROFILES[d.aggr].note)}</p>
           <div class="actions"><button type="button" class="btn primary" id="plan-lock">${locked ? '✓ Plan locked in' : 'Lock in plan'}</button><button type="button" class="btn" id="plan-ask">Ask me the questions</button></div>
         </div></div>`;
+      if (keep) planBody.querySelector(keep)?.focus({ preventScroll: true });
     },
   };
+  const replan = () => app.markDirty('plan');
   planBody.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.step) app.planStep(b.dataset.step, +b.dataset.dir);
@@ -172,7 +183,8 @@ export function initSheets(app) {
     const f = e.target.dataset?.field; if (!f) return;
     const v = Math.round(parseFloat(e.target.value.replace(/[^0-9.]/g, '')));
     if (v > 0) app.planDraft[f] = Math.max(f === 'capital' ? 100 : 10, Math.min(1e8, v));
-    planKey = ''; setTimeout(() => app.markDirty('plan'), 0);
+    e.target.value = fmtMoney(app.planDraft[f]);
+    setTimeout(replan, 0);
   });
   planBody.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset?.field) e.target.blur(); });
 
@@ -232,6 +244,7 @@ function initCalc(app) {
     app.calc = null; app.ensureCalc(sym);
     $('c-strat').value = 'long-call';
     renderAll();
+    if (!app.feed.quote(sym) && app.feed.status.mode === 'demo') app.toast(`No demo data for ${sym}. Add it to the watchlist first.`);
   }
   $('c-load').addEventListener('click', loadSym);
   $('c-sym').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); loadSym(); e.target.blur(); } });
@@ -288,7 +301,7 @@ function initCalc(app) {
     if (k === 'side') leg.side = +v; else if (k === 'type') leg.type = v; else if (k === 'strike') leg.strike = +v || leg.strike; else if (k === 'qty') leg.qty = Math.max(1, Math.round(+v || 1));
     else if (k === 'entry') leg.entry = Math.max(0, +v || 0); else if (k === 'iv') leg.iv = Math.max(0.01, (+v || 20) / 100);
     $('c-strat').value = 'custom';
-    if (k === 'type' || k === 'strike') { app.calcReprice(leg); renderLegs(); app.calcFromChain({ quiet: true }); }
+    if (k === 'type' || k === 'strike') { app.calcReprice(leg); afterPointer(renderLegs); app.calcFromChain({ quiet: true }); }
     renderOut();
   });
   $('c-legs').addEventListener('click', (e) => {
@@ -326,7 +339,7 @@ function initCalc(app) {
     $('c-heat').innerHTML = html + '</tbody></table>';
     drawPayoff($('c-payoff'), c, S, rr, grid);
   }
-  app.onCalcChange = () => { if (app.focus !== 'calc') return; if (!$('c-legs').contains(document.activeElement)) renderLegs(); renderExp(); renderOut(); };
+  app.onCalcChange = () => { if (app.focus !== 'calc') return; if (!$('c-legs').contains(document.activeElement)) afterPointer(renderLegs); renderExp(); renderOut(); };
   app.views.calc = {
     gap: 1500, visible: () => app.focus === 'calc' && !document.hidden,
     render() {
@@ -406,7 +419,7 @@ function initSettings(app) {
     <label class="check"><input id="s-a-bells" type="checkbox"> Opening and closing bell</label>
     <label class="check"><input id="s-a-tv" type="checkbox"> Read out my TradingView alerts</label>
     <div class="actions" style="margin-top:8px"><button type="button" id="s-notify" class="btn mini">Notify me when INDAI is in the background</button></div>
-    <p class="note" style="margin-top:8px">Setup alerts arrive while INDAI is open (a tab in the background counts). Alerts with the app fully closed are on the backend to-do list.</p>
+    <p class="note" style="margin-top:8px">Setup alerts arrive while INDAI is open. On a computer or Android a background tab still counts for a while; on iPhone and iPad keep INDAI on screen. Alerts with the app fully closed are on the backend to-do list.</p>
 
     <h3>Headset-only</h3>
     <p class="note">Scenes, hand gestures and the gesture tutorial live in the Quest app. This website shares the same brain, data and game plan logic.</p>

@@ -114,7 +114,7 @@ body[data-tab="watch"] .view[data-view="watch"], body[data-tab="chart"] .view[da
 .addsym input { width: 104px; min-height: 36px; font-size: 16px; font-family: var(--mono); text-transform: uppercase; padding: 0 10px; }
 .addsym input::placeholder { text-transform: none; font-family: var(--sans); font-size: 13px; }
 .wrows { display: grid; gap: 2px; overflow-y: auto; min-height: 0; margin: 0 -4px; padding: 0 4px; }
-.wrow { position: relative; display: grid; grid-template-columns: minmax(76px, 1fr) minmax(40px, 96px) minmax(74px, auto) 32px; align-items: center; gap: 8px; height: 52px; padding: 0 2px 0 10px; border-radius: 8px; }
+.wrow { position: relative; display: grid; grid-template-columns: minmax(76px, 1fr) minmax(40px, 96px) minmax(74px, auto) 44px; align-items: center; gap: 8px; height: 52px; padding: 0 0 0 10px; border-radius: 8px; }
 .wrow .hit { position: absolute; inset: 0; border-radius: 8px; }
 .wrow:hover { background: var(--raised); }
 .wrow.sel { background: var(--gold-soft); box-shadow: inset 2px 0 0 var(--gold); }
@@ -128,7 +128,7 @@ body[data-tab="watch"] .view[data-view="watch"], body[data-tab="chart"] .view[da
 .w-px { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; white-space: nowrap; }
 .w-px b { font: 500 15px var(--mono); font-variant-numeric: tabular-nums; }
 .w-px i { font: 600 12px var(--mono); font-style: normal; font-variant-numeric: tabular-nums; }
-.wrow .dive { position: relative; width: 32px; height: 36px; display: grid; place-items: center; border-radius: 8px; color: var(--faint); }
+.wrow .dive { position: relative; width: 44px; height: 48px; display: grid; place-items: center; border-radius: 8px; color: var(--faint); }
 .wrow .dive:hover { color: var(--gold); background: var(--hover); }
 .wrow .dive svg { width: 17px; height: 17px; }
 
@@ -503,7 +503,8 @@ body.typing { --tab-h: 0px; --sab: 0px; }
   #p-risk, #p-today, #p-levels { overflow-y: auto; scrollbar-width: thin; }
   #p-watch { padding: 10px 8px 8px 10px; }
   #p-watch .ph { margin-bottom: 6px; }
-  .wrow { height: 44px; gap: 6px; }
+  .wrow { height: 44px; gap: 6px; grid-template-columns: minmax(76px, 1fr) minmax(40px, 96px) minmax(74px, auto) 32px; padding-right: 2px; }
+  .wrow .dive { width: 32px; height: 40px; }
   .w-sym b, .w-px b { font-size: 14px; }
   .addsym input { width: 92px; }
   .ll-host { margin-bottom: 4px; }

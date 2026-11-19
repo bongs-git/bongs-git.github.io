@@ -35,8 +35,12 @@ export function initViews(app) {
 
   // keep the conversation above the on-screen keyboard
   const vv = window.visualViewport;
-  const setVV = () => { document.documentElement.style.setProperty('--vvh', `${Math.round(vv ? vv.height : window.innerHeight)}px`); };
-  if (vv) { vv.addEventListener('resize', setVV); window.addEventListener('resize', setVV); setVV(); }
+  const setVV = () => {
+    document.documentElement.style.setProperty('--vvh', `${Math.round(vv ? vv.height : window.innerHeight)}px`);
+    // iOS pans the page when the keyboard opens; bring the conversation back so the composer sits right above the keys
+    if (body.classList.contains('typing') && app.layout === 'phone' && app.tab === 'indai' && !app.focus) window.scrollTo(0, 0);
+  };
+  if (vv) { vv.addEventListener('resize', setVV); vv.addEventListener('scroll', setVV); window.addEventListener('resize', setVV); setVV(); }
   document.addEventListener('focusin', (e) => { if (app.layout === 'phone' && e.target.matches('input[type=text], input[type=number], input[type=password], textarea')) body.classList.add('typing'); });
   document.addEventListener('focusout', () => { setTimeout(() => { if (!document.activeElement?.matches?.('input, textarea')) body.classList.remove('typing'); }, 60); });
 
@@ -365,7 +369,7 @@ export function initViews(app) {
       const rag = an.final?.rag || an.score.rag; kind = RAG_CLASS[rag] || '';
       const line = an.final?.headline || (an.score.gate ?? (an.score.cons[0] ? `Watch out: ${an.score.cons[0].name.toLowerCase()}` : an.score.pros[0] ? `Supporting: ${an.score.pros[0].name.toLowerCase()}` : ''));
       key = 'an:' + an.at + rag + !!an.final + an.pendingAI;
-      html = `<div class="pin-top"><span class="pill ${kind}">${rag}</span><span class="r">${an.score.score}/100${an.final ? ' · with research' : an.pendingAI ? ' · researching…' : ''}</span></div><h3>${esc(ideaLabel(an.idea))}</h3><p>${esc(line)}</p><div class="pin-actions"><button type="button" class="btn" data-act="details">Details</button><button type="button" class="btn" data-act="calc">Calculator</button></div>`;
+      html = `<div class="pin-top"><span class="pill ${kind}">${esc(rag)}</span><span class="r">${an.score.score}/100${an.final ? ' · with research' : an.pendingAI ? ' · researching…' : ''}</span></div><h3>${esc(ideaLabel(an.idea))}</h3><p>${esc(line)}</p><div class="pin-actions"><button type="button" class="btn" data-act="details">Details</button><button type="button" class="btn" data-act="calc">Calculator</button></div>`;
     }
     if (key === pinKey) return; pinKey = key;
     pin.hidden = !key; pin.className = 'pin ' + kind; pin.innerHTML = html;
