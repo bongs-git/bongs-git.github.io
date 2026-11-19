@@ -11,10 +11,21 @@ on:
 permissions:
   contents: write
 
-concurrency: quest-apk
-
 jobs:
   apk:
+    # Two apps from the same site: INDAI (immersive, scenes + passthrough) and INDAI Window
+    # (a regular window that sits in your Quest home / Loft).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: immersive
+            template: twa-manifest.template.json
+            apk: indai-quest.apk
+          - id: window
+            template: twa-manifest.window.template.json
+            apk: indai-window.apk
+    concurrency: quest-apk-${{ matrix.id }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -87,7 +98,7 @@ jobs:
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}' "$JAVA_HOME" "$ANDROID_HOME" > ~/.bubblewrap/config.json
           mkdir -p build-apk && cd build-apk
           sed -e "s#__HOST__#$HOST#g" -e "s#__BASE__#$BASE#g" -e "s#__VERSION_CODE__#$GITHUB_RUN_NUMBER#g" \
-            ../android/twa-manifest.template.json > twa-manifest.json
+            ../android/${{ matrix.template }} > twa-manifest.json
           cp ../android/jarvis-release.keystore android.keystore
           bubblewrap update --skipVersionUpgrade < /dev/null
           sed -i 's/jcenter()/mavenCentral()/g' build.gradle
@@ -100,22 +111,21 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.QUEST_KEYSTORE_PASSWORD }}
         run: |
           bubblewrap build --skipPwaValidation < /dev/null
-          cp app-release-signed.apk ../indai-quest.apk
+          cp app-release-signed.apk ../${{ matrix.apk }}
 
       - uses: actions/upload-artifact@v4
         if: steps.gate.outputs.ok == 'true'
         with:
-          name: indai-quest-apk
-          path: indai-quest.apk
+          name: ${{ matrix.id }}-apk
+          path: ${{ matrix.apk }}
 
       - name: Attach to the "quest-app" release
         if: steps.gate.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view quest-app > /dev/null 2>&1 || \
-            gh release create quest-app --title "INDAI for Meta Quest" \
-              --notes "Install indai-quest.apk on your Quest. Steps are in INSTALL-QUEST-APP.md."
-          gh release edit quest-app --title "INDAI for Meta Quest" --notes "Install indai-quest.apk on your Quest. Steps are in INSTALL-QUEST-APP.md." || true
-          gh release upload quest-app indai-quest.apk --clobber
+          NOTES="indai-quest.apk: INDAI in mixed reality and virtual scenes. indai-window.apk: INDAI as a window in your Quest home (the Loft). Steps are in INSTALL-QUEST-APP.md."
+          gh release view quest-app > /dev/null 2>&1 || gh release create quest-app --title "INDAI for Meta Quest" --notes "$NOTES" || true
+          gh release edit quest-app --title "INDAI for Meta Quest" --notes "$NOTES" || true
+          gh release upload quest-app "${{ matrix.apk }}" --clobber
           gh release delete-asset quest-app jarvis-quest.apk --yes || true
