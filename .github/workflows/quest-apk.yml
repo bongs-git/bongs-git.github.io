@@ -100,13 +100,13 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.QUEST_KEYSTORE_PASSWORD }}
         run: |
           bubblewrap build --skipPwaValidation < /dev/null
-          cp app-release-signed.apk ../jarvis-quest.apk
+          cp app-release-signed.apk ../indai-quest.apk
 
       - uses: actions/upload-artifact@v4
         if: steps.gate.outputs.ok == 'true'
         with:
-          name: jarvis-quest-apk
-          path: jarvis-quest.apk
+          name: indai-quest-apk
+          path: indai-quest.apk
 
       - name: Attach to the "quest-app" release
         if: steps.gate.outputs.ok == 'true'
@@ -114,6 +114,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view quest-app > /dev/null 2>&1 || \
-            gh release create quest-app --title "Jarvis for Meta Quest" \
-              --notes "Install this APK on your Quest. Steps are in INSTALL-QUEST-APP.md."
-          gh release upload quest-app jarvis-quest.apk --clobber
+            gh release create quest-app --title "INDAI for Meta Quest" \
+              --notes "Install indai-quest.apk on your Quest. Steps are in INSTALL-QUEST-APP.md."
+          gh release edit quest-app --title "INDAI for Meta Quest" --notes "Install indai-quest.apk on your Quest. Steps are in INSTALL-QUEST-APP.md." || true
+          gh release upload quest-app indai-quest.apk --clobber
+          gh release delete-asset quest-app jarvis-quest.apk --yes || true
