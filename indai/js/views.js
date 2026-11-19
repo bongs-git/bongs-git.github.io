@@ -170,7 +170,7 @@ export function initViews(app) {
         const ext = q && q.ext != null;
         // a fresh idea on this ticker takes the small line for its first 20 minutes
         const idea = app.forming[sym] || app.signals.find(x => x.sym === sym && !x.practice && Date.now() - x.at < 20 * 60e3);
-        setText(nEl, idea ? `${idea.dir > 0 ? '▲ call' : '▼ put'} ${idea.forming ? 'forming' : 'idea'} ${idea.score}` : ext ? `ext ${fmtPct(q.extPct)}` : near ? `${near.short} ${near.dist >= 0 ? '+' : ''}${near.dist.toFixed(2)}%` : '\u00a0');
+        setText(nEl, idea ? `${idea.dir > 0 ? '▲' : '▼'} ${idea.forming ? 'forming' : 'idea'} ${idea.score}` : ext ? `ext ${fmtPct(q.extPct)}` : near ? `${near.short} ${near.dist >= 0 ? '+' : ''}${near.dist.toFixed(2)}%` : '\u00a0');
         setClass(nEl, idea ? (idea.dir > 0 ? 'up' : 'down') : ext ? cls(q.extPct) : near && Math.abs(near.dist) < 0.15 ? 'near' : '');
         setText(row.querySelector('.w-px b'), q ? fmtPrice(q.last) : '—');
         const pEl = row.querySelector('.w-px i');

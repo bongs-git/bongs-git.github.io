@@ -357,8 +357,8 @@ body.typing .view[data-view="indai"] .composer { padding-right: 0; }
   background-repeat: no-repeat; opacity: 0; transform: scale(.9); transition: opacity .15s, transform .15s; }
 .fab.listening .ring, .fab.busy .ring { opacity: 1; transform: scale(calc(1 + var(--lvl, 0) * .22)); }
 .fab:active { transform: scale(.96); }
-body.typing .fab, body.typing .tabs { display: none; }
-body.typing { --tab-h: 0px; --sab: 0px; }
+body.typing .fab, body.typing .tabs, body.typing .ideas, body.typing #idea-alert { display: none; }
+body.typing { --tab-h: 0px; --sab: 0px; --ideas-h: 0px; }
 .tabs { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; height: calc(var(--tab-h) + var(--sab)); padding: 0 var(--sar) var(--sab) var(--sal); display: grid; grid-template-columns: repeat(5, 1fr); background: rgba(7,10,14,.96); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border-top: 1px solid var(--line); }
 .tabs button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--faint); font-size: 11px; font-weight: 500; }
 .tabs button svg { width: 22px; height: 22px; }
@@ -570,7 +570,7 @@ body.typing { --tab-h: 0px; --sab: 0px; }
 @media (min-width: 1320px) {
   :root { --indai-w: 364px; --left-w: 300px; }
   html, body { height: 100%; }
-  #app { height: calc(100dvh - var(--top-h)); min-height: 640px; grid-template-columns: 288px repeat(3, minmax(0, 1fr)) var(--indai-w); grid-template-rows: repeat(24, minmax(0, 1fr)); grid-template-areas: none; }
+  #app { height: calc(100dvh - var(--top-h)); min-height: 600px; grid-template-columns: 288px repeat(3, minmax(0, 1fr)) var(--indai-w); grid-template-rows: repeat(24, minmax(0, 1fr)); grid-template-areas: none; }
   #p-watch { grid-area: 1 / 1 / 11 / 2; } #p-risk { grid-area: 11 / 1 / 25 / 2; }
   #p-chart { grid-area: 1 / 2 / 17 / 5; }
   #p-levels { grid-area: 17 / 2 / 25 / 3; } #p-leadlag { grid-area: 17 / 3 / 25 / 4; } #p-today { grid-area: 17 / 4 / 25 / 5; }

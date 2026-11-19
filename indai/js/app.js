@@ -84,7 +84,8 @@ const say = (...a) => app.indai.say(...a);
   // "Show me the ideas" (typed or spoken) opens today's list.
   const route = ind.route.bind(ind);
   ind.route = async (text) => {
-    if (!ind.awaiting && /^\s*(show|open|see|list|what are|where are)?\s*(me )?(all )?(the |my |today s |todays )?(trade |trading )?(ideas|setups|set ups)( today| list| so far)?\s*$/i.test(text)) {
+    const plain = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!ind.awaiting && /^(?:(?:show|open|see|list|what are|where are) )?(?:me )?(?:all )?(?:(?:the|my|today s|todays) )?(?:(?:trade|trading) )?(?:ideas|setups|set ups)(?: (?:today|list|so far))?$/.test(plain)) {
       const n = app.signals.filter(x => !x.practice).length;
       app.openIdeas();
       ind.say(n ? `${n} idea${n === 1 ? '' : 's'} so far today. Newest first.` : 'No setups have confirmed yet today. They show here the moment one does.', 'info');
@@ -132,6 +133,7 @@ const say = (...a) => app.indai.say(...a);
       return p;
     };
   }
+  app.micSession = (on) => session(on || micOn() ? 'play-and-record' : 'playback');
   let unlocked = false, quietLoop = null, lastWake = 0;
   // Call from a tap. Safe to call on every tap.
   app.unlockSound = () => {
@@ -154,7 +156,7 @@ const say = (...a) => app.indai.say(...a);
       if (c.state !== 'running' || c.currentTime !== t) return;            // not running yet (needs a tap), or healthy
       await Promise.race([c.suspend(), wait(400)]); await Promise.race([c.resume(), wait(500)]); await wait(180);
       // still stuck: start a fresh audio engine (only possible from a tap, and never in the middle of listening or speaking)
-      if (c.currentTime === t && tap && v.ctx === c && !v.playing && !v.state.listening) { try { c.close(); } catch {} v.ctx = null; v.unlock(); }
+      if (c.currentTime === t && tap && v.ctx === c && !v.playing && !micOn()) { try { c.close(); } catch {} v.ctx = null; v.unlock(); }
     } catch {}
   };
   // How long the natural voice takes to start talking. It runs on this device, and on a phone that can be slow.
@@ -660,24 +662,40 @@ app.maybeCheckIn = maybeCheckIn;
 // ------------------------------------------------------------------ INDAI's own setup alerts ("ideas")
 // app.signals is today's list, newest first. It is kept for the New York day, so a reload (or iOS putting the
 // page to sleep) never loses the ideas, and setups that confirmed while nobody was looking are caught up quietly.
-const sigMem = { lastBar: {}, lastOne: {}, scanned: new Set(), last: {}, hour: [], pausedNote: 0 };
+const sigMem = { lastBar: {}, lastOne: {}, lastOneAt: {}, scanned: new Set(), last: {}, hour: [], pausedNote: 0 };
 const IDEAS_KEY = 'indai.web.ideas.v1';
 const ideaId = (s) => `${s.sym}|${s.strat}|${s.dir}|${s.barT}`;
 app.forming = {};                 // ticker -> a setup taking shape on the candle that is still open
 app.ideaFocus = null;             // the idea whose entry, stop and target are drawn on the chart
 let ideasDay = etParts().ymd;
-function storedIdeas() {
-  try { const j = JSON.parse(localStorage.getItem(IDEAS_KEY)); if (j && j.ymd === etParts().ymd && Array.isArray(j.list)) return j.list.filter(x => x && x.sym && x.contract && x.barT && x.id); } catch {}
-  return [];
+function stored() {
+  try { const j = JSON.parse(localStorage.getItem(IDEAS_KEY)); if (j && j.ymd === etParts().ymd && Array.isArray(j.list)) return { list: j.list.filter(x => x && x.sym && x.contract && x.barT && x.id), seen: Array.isArray(j.seen) ? j.seen : [] }; } catch {}
+  return { list: [], seen: [] };
 }
+let saveTimer = 0;
 function saveIdeas() {
+  clearTimeout(saveTimer); saveTimer = 0;
   if (app.feed.status.mode === 'demo') return;          // simulated ideas are never kept
-  try { localStorage.setItem(IDEAS_KEY, JSON.stringify({ ymd: ideasDay, list: app.signals.filter(x => !x.practice && !x.demo).slice(0, 40) })); } catch {}
+  try { localStorage.setItem(IDEAS_KEY, JSON.stringify({ ymd: ideasDay, list: app.signals.filter(x => !x.practice && !x.demo).slice(0, 40), seen: [...sigMem.scanned] })); } catch {}
 }
+// Which candles have been looked at is saved too (a few seconds after it changes), so a reload never goes over them again.
+function sawCandle(key) { if (sigMem.scanned.has(key)) return; sigMem.scanned.add(key); if (!saveTimer) saveTimer = setTimeout(saveIdeas, 4000); }
+window.addEventListener('pagehide', () => { if (saveTimer) saveIdeas(); });
+// The 20-minute repeat rule and the alerts-per-hour count pick up from the day's list, so a reload or a catch-up
+// never lets the same setup alert again a candle later.
+function seedMemory() {
+  const now = Date.now();
+  for (const x of app.signals) {
+    if (x.practice) continue;
+    const k = x.sym + x.strat + x.dir; if ((sigMem.last[k] || 0) < x.at) sigMem.last[k] = x.at;
+    if (!x.quiet && now - x.at < 3600e3 && !sigMem.hour.includes(x.at)) sigMem.hour.push(x.at);
+  }
+}
+function loadIdeas() { const st = stored(); app.signals = [...app.signals.filter(x => x.practice && !x.demo), ...st.list].sort((a, b) => b.at - a.at); sigMem.scanned = new Set(st.seen); sigMem.last = {}; sigMem.hour = []; seedMemory(); }
 function ideasChanged() { for (const v of ['indai', 'summary', 'today', 'ideabar', 'ideas', 'chart', 'watch', 'more']) app.markDirty(v); }
-if (app.settings.dataMode !== 'demo') app.signals = storedIdeas();
-function nextExpiries() {
-  const p = etParts(), todayOk = isTradingDay(p.y, p.m, p.d) && Date.now() < etToMs(p.y, p.m, p.d, 16, 0);
+if (app.settings.dataMode !== 'demo') loadIdeas();
+function nextExpiries(at = Date.now()) {
+  const p = etParts(at), todayOk = isTradingDay(p.y, p.m, p.d) && at < etToMs(p.y, p.m, p.d, 16, 0);
   const today = todayOk ? fmtYMD(p.y, p.m, p.d) : fmtYMD(...nextTradingDay(p.y, p.m, p.d));
   const [y, m, d] = today.split('-').map(Number);
   return { today, next: fmtYMD(...nextTradingDay(y, m, d)) };
@@ -694,7 +712,7 @@ function leadDirection() {
 }
 function contractFor(sig, plan, at = Date.now()) {
   const q = app.feed.quote(sig.sym);
-  return suggestContract(sig, plan, { iv: q?.iv30 ? q.iv30 / 100 : 0.22, r: app.settings.rate ?? 0.04, strikeStep: strikeStep(sig.sym, sig.price), now: at, nextExpiry: nextExpiries() });
+  return suggestContract(sig, plan, { iv: q?.iv30 ? q.iv30 / 100 : 0.22, r: app.settings.rate ?? 0.04, strikeStep: strikeStep(sig.sym, sig.price), now: at, nextExpiry: nextExpiries(at) });
 }
 function setForming(sym, c) {
   const was = app.forming[sym];
@@ -712,7 +730,7 @@ function alertFloor(plan) {
   return plan.minScore;
 }
 // Candles that close while alerts are off count as seen, so they are not "caught up" later.
-function markSeen() { for (const sym of app.settings.symbols) { const b = completedBars(sym); if (b.length) sigMem.scanned.add(sym + b[b.length - 1].t); } }
+function markSeen() { for (const sym of app.settings.symbols) { const b = completedBars(sym); if (!b.length) continue; const t = b[b.length - 1].t; sigMem.lastBar[sym] = t; sawCandle(sym + t); } }
 function scanTick() {
   const ms = marketStatus();
   const demo = app.feed.status.mode === 'demo';
@@ -735,7 +753,7 @@ function scanTick() {
       sigMem.lastBar[sym] = lastT;
       setForming(sym, null);                                   // that candle has closed: it confirms now or not at all
       if (now - (lastT + 300e3) > (liveData ? 6 * 60e3 : 25 * 60e3)) continue; // stale bar
-      sigMem.scanned.add(sym + lastT);
+      sawCandle(sym + lastT);
       const cands = scanSetups(sym, bars, { levels: lv, leadDir, now, enabled: plan.strategies })
         .filter(c => c.score >= minScore).sort((a, b) => b.score - a.score);
       const sig = cands.find(c => now - (sigMem.last[sym + c.strat + c.dir] || 0) > 20 * 60e3);
@@ -757,8 +775,11 @@ function lookAhead(sym, done, { lv, leadDir, plan, minScore, now, liveData }) {
   const five = app.feed.getBars(sym, '5min'), open = five[five.length - 1], lastDone = done[done.length - 1];
   const one = app.feed.getBars(sym, '1min');
   const latest = one.length ? one[one.length - 1].t + 60e3 : 0;      // how far into the open candle the data reaches
-  if (sigMem.lastOne[sym] === latest) return;                         // nothing new since the last look
-  sigMem.lastOne[sym] = latest;
+  if (sigMem.lastOne[sym] === latest) {                               // nothing new since the last look
+    if (app.forming[sym] && now - (sigMem.lastOneAt[sym] || 0) > 150e3) setForming(sym, null);   // the candles stopped coming
+    return;
+  }
+  sigMem.lastOne[sym] = latest; sigMem.lastOneAt[sym] = now;
   const mins = open ? Math.round((latest - open.t) / 60e3) : 0;
   if (!open || open.t !== lastDone.t + 300e3 || mins < 2 || mins > 4 || now - latest > (liveData ? 150e3 : 25 * 60e3)) { setForming(sym, null); return; }
   const c = scanSetups(sym, [...done, { ...open, v: Math.round((open.v || 0) * 5 / mins) }], { levels: lv, leadDir, now, enabled: plan.strategies })
@@ -809,7 +830,8 @@ function catchUp() {
     const lv = app.levelsFor(sym), last = {};
     for (let i = 6; i <= bars.length; i++) {
       const sub = bars.slice(0, i), barT = sub[i - 1].t, at = barT + 300e3;
-      if (sigMem.scanned.has(sym + barT) || now - at < 90e3) continue;   // the live scan had (or is about to have) this candle
+      if (sigMem.scanned.has(sym + barT)) continue;                      // looked at already, live or in an earlier catch-up
+      sawCandle(sym + barT);
       const c = scanSetups(sym, sub, { levels: lv, leadDir: 0, now: at, enabled: plan.strategies })
         .filter(x => x.score >= floor && at - (last[x.strat + x.dir] || 0) > 20 * 60e3).sort((a, b) => b.score - a.score)[0];
       if (!c) continue;
@@ -823,10 +845,11 @@ function catchUp() {
     c.quiet = 'earlier'; c.contract = contractFor(c, plan, c.at);
     app.signals.push(c); added++;
   }
-  if (added) { app.signals.sort((a, b) => b.at - a.at); if (app.signals.length > 40) app.signals.length = 40; saveIdeas(); ideasChanged(); }
+  if (added) { app.signals.sort((a, b) => b.at - a.at); if (app.signals.length > 40) app.signals.length = 40; seedMemory(); saveIdeas(); ideasChanged(); }
   return added;
 }
 app.catchUpIdeas = catchUp;
+app._ideaMem = sigMem;               // read by the tests
 // What has happened to an idea since its candle closed: did price reach the target or the stop first, and where is it now.
 app.ideaOutcome = (sig) => {
   const q = app.feed.quote(sig.sym), last = q?.last ?? null, after = sig.barT + 300e3;
@@ -970,8 +993,10 @@ app.primeMic = async () => {
     const st = await navigator.permissions?.query({ name: 'microphone' }).catch(() => null);
     if (st && st.state !== 'prompt') return st.state;
   } catch {}
+  app.micSession?.(true);
   try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); return 'granted-now'; }
   catch { return 'denied'; }
+  finally { app.micSession?.(false); }
 };
 
 // ------------------------------------------------------------------ alerts
@@ -1074,14 +1099,19 @@ let lastFeedRev = -1, lastMode = null, lastSecond = 0, lastGex = 0, lastTV = 0, 
 // The setup scan runs the moment new candles land (and every few seconds as a backstop), not on a slow timer.
 const bootAt = Date.now();
 let lastCatchUp = 0, scanTimer = 0;
-function runScan() { lastScan = Date.now(); try { scanTick(); } catch (e) { console.warn('scan', e); } }
+function runScan() {
+  if (Date.now() - bootAt < 2500) return;        // let the page finish laying itself out before anything can pop up
+  lastScan = Date.now(); try { scanTick(); } catch (e) { console.warn('scan', e); }
+}
 function scanSoon() { clearTimeout(scanTimer); scanTimer = setTimeout(runScan, 120); }
 function runCatchUp({ tell = true } = {}) {
   lastCatchUp = Date.now();
+  runScan();                                    // the live scan goes first, so the newest candle alerts instead of being listed quietly
   let n = 0; try { n = catchUp(); } catch (e) { console.warn('catch up', e); }
   if (n && tell) app.toast(`${n} setup${n === 1 ? '' : 's'} confirmed earlier today ${n === 1 ? 'is' : 'are'} in Ideas`);
   return n;
 }
+app.runCatchUp = runCatchUp;
 function tick() {
   const now = Date.now();
   if (app.feed.rev !== lastFeedRev) { lastFeedRev = app.feed.rev; FEED_VIEWS.forEach(id => app.dirty.add(id)); schedule(); if (now - lastScan > 1500) scanSoon(); }
@@ -1089,8 +1119,8 @@ function tick() {
     const was = lastMode; lastMode = app.feed.status.mode;
     // ideas belong to the data they came from: simulated ones never mix with real ones
     if (!was || (was === 'demo') !== (lastMode === 'demo')) {
-      app.signals = lastMode === 'demo' ? app.signals.filter(x => x.demo || x.practice) : [...app.signals.filter(x => x.practice && !x.demo), ...storedIdeas()].sort((a, b) => b.at - a.at);
-      app.forming = {}; sigMem.scanned.clear(); lastCatchUp = 0;
+      if (lastMode === 'demo') { app.signals = app.signals.filter(x => x.demo || x.practice); sigMem.scanned = new Set(); sigMem.last = {}; sigMem.hour = []; } else loadIdeas();
+      app.forming = {}; sigMem.lastBar = {}; lastCatchUp = 0;
     }
     if (was && lastMode === 'demo' && was !== 'demo') say("I couldn't reach market data, so these are demo prices for now. Everything still works for practice.", 'alert', { speak: false });
     app.markDirty('all');
@@ -1107,7 +1137,7 @@ function tick() {
   if (now - lastBridge > bridgeGap()) { lastBridge = now; pollBridge(); }
   if (now - lastScan > 5000) runScan();
   app.markDirty('ideabar'); if (app.focus === 'ideas') app.markDirty('ideas');
-  if (etParts().ymd !== ideasDay) { ideasDay = etParts().ymd; app.signals = app.signals.filter(x => x.practice); app.forming = {}; sigMem.scanned.clear(); saveIdeas(); ideasChanged(); }
+  if (etParts().ymd !== ideasDay) { ideasDay = etParts().ymd; app.signals = app.signals.filter(x => x.practice); app.forming = {}; sigMem.scanned = new Set(); sigMem.last = {}; sigMem.hour = []; saveIdeas(); ideasChanged(); }
   // Ideas that confirmed before the page was opened: as soon as the candles are in, then again shortly after
   // (tickers load at different speeds), then every two minutes as a backstop.
   const barsIn = app.settings.symbols.some(x => app.feed.getBars(x, '5min').length >= 6);

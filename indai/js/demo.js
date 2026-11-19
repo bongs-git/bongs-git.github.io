@@ -121,6 +121,9 @@ export function installRelayGuards(app) {
     if (mode === 'memory' || mode === 'history' || mode === 'profile') return realBrain(body, pass);   // these spend no thinking
     const talk = mode === 'talk';
     if (thinkingOut()) return answerWithoutThinking(app, body, talk);
+    // A pause ends at midnight New York time. One strike carries over: if the first research call of the new day
+    // fails as well, it is still broken on the backend and pauses again straight away.
+    if (care.pauseUntil && Date.now() >= care.pauseUntil) { care.pauseUntil = 0; care.fails = 1; saveCare(); }
     if (!talk && researchPaused()) throw coded('paused', 'it is paused until midnight New York time after failing on the backend; Settings turns it back on');
     try {
       const res = await realBrain(body, pass);

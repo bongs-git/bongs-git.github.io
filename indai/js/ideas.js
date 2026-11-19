@@ -32,8 +32,8 @@ export function initIdeas(app) {
     const p = app.day.plan && app.day.goalHit && app.activePlan().afterGoal === 'stop';
     if (rs !== 'armed') return ['paused', `Alerts paused: breaker ${rs === 'tripped' ? 'tripped' : 'on cooldown'}`];
     if (p) return ['paused', 'Goal hit: alerts are off for the day'];
-    if (ms.state !== 'open' && !(demo && app.settings.demoSignals)) return ['off', ms.state === 'pre' ? 'Scanning starts at the open' : 'Market closed. Setups show here as they confirm'];
-    return ['on', `Scanning ${n} ticker${n === 1 ? '' : 's'} · no setups yet today`];
+    if (ms.state !== 'open' && !(demo && app.settings.demoSignals)) return ['off', ms.state === 'pre' ? 'Scanning starts at the open' : 'Market closed. Setups show here'];
+    return ['on', `Scanning ${n} ticker${n === 1 ? '' : 's'} · none yet today`];
   }
 
   // ------------------------------------------------------------ the strip
@@ -97,7 +97,7 @@ export function initIdeas(app) {
     render() {
       if (Date.now() < holdUntil) { setTimeout(() => app.markDirty('ideas'), 720); return; }     // never rebuild under a finger
       const list = all(), [, text] = scanState(), plan = app.activePlan();
-      if (!list.some(s => s.id === app.ideaOpen)) app.ideaOpen = list[0]?.id || null;
+      if (app.ideaOpen !== '' && !list.some(s => s.id === app.ideaOpen)) app.ideaOpen = list[0]?.id || null;      // '' = all closed on purpose
       const n = app.signals.filter(s => !s.practice).length;
       const head = `<p class="note ideas-how">${n ? `${n} idea${n === 1 ? '' : 's'} today, newest first.` : esc(text) + '.'} Alerting on ${esc(plan.strategies.map(x => STRATEGIES[x].short).join(', '))} setups scoring ${plan.minScore}+, up to ${plan.perHour} alerts an hour.</p>`;
       const cards = list.map(s => card(s, s.id === app.ideaOpen)).join('');
@@ -111,7 +111,7 @@ export function initIdeas(app) {
   };
   body.addEventListener('click', (e) => {
     const t = e.target.closest('[data-toggle]');
-    if (t) { app.ideaOpen = app.ideaOpen === t.dataset.toggle ? null : t.dataset.toggle; holdUntil = 0; listKey = ''; V.ideas.render(); return; }
+    if (t) { app.ideaOpen = app.ideaOpen === t.dataset.toggle ? '' : t.dataset.toggle; holdUntil = 0; listKey = ''; V.ideas.render(); return; }
     const b = e.target.closest('[data-do]'); if (!b) return;
     const s = app.ideaById(b.closest('.idea').dataset.id); if (!s) return;
     if (b.dataset.do === 'chart') app.showIdeaOnChart(s); else app.analyzeIdea(s);
