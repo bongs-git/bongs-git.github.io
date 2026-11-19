@@ -10,7 +10,13 @@
 //   2. Add this strategy. In its settings, set the score line and the risk per trade to match your plan.
 //   3. In the INDAI website open Ideas, Retrospective, and tap "Copy the changes for TradingView".
 //      Paste that line into "Changes" here. Untick "Apply the changes" to see the same test without them.
-//   4. The Strategy Tester tab has all the numbers. Bar Replay plays the day forward one candle at a time.
+//   4. The box on the chart has the main results (trades, win rate, result, profit factor, drawdown) and the
+//      Strategy Tester tab has every trade. Bar Replay plays the day forward one candle at a time.
+//
+// Reading the marks on the chart
+//   - A coloured label is an alert with its score, for example "66 (was 60)": 66 after the changes, 60 before.
+//   - The numbers TradingView prints beside a trade are shares, not dollars: "-163" is 163 shares sold short,
+//     "+163" with "stop" or "target" is those shares bought back at the stop or the target.
 //
 // What it does and does not match
 //   - The setups, scores, stops and targets are the app's scanner, line for line (EMA clouds, VWAP, opening range,
@@ -46,6 +52,7 @@ pw2In = input.float(0.0, "Put wall 2", group = G3)
 G4 = "Display"
 showLabels = input.bool(true, "Mark every alert with its score", group = G4)
 showLines  = input.bool(true, "Draw the session VWAP and the fast EMA cloud", group = G4)
+boxWhere   = input.string("Top right", "Where to show the results box", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = G4)
 
 TZ = "America/New_York"
 float cw  = cwIn  > 0 and useGex ? cwIn  : na
@@ -57,6 +64,7 @@ float pw2 = pw2In > 0 and useGex ? pw2In : na
 // ---------------------------------------------------------------- the changes line: key=points;key=points;...
 var string[] adjKeys = array.new_string(0)
 var float[]  adjVals = array.new_float(0)
+var int nChanges = 0
 if barstate.isfirst and applyIn and str.length(codeIn) > 0
     string[] parts = str.split(codeIn, ";")
     for part in parts
@@ -64,8 +72,13 @@ if barstate.isfirst and applyIn and str.length(codeIn) > 0
         if array.size(kv) == 2
             float val = str.tonumber(array.get(kv, 1))
             if not na(val)
-                array.push(adjKeys, array.get(kv, 0))
+                string kName = array.get(kv, 0)
+                array.push(adjKeys, kName)
                 array.push(adjVals, val)
+                // "minadd=0", "stop=1" and "target=1" are in every line and change nothing, so they are not counted
+                bool neutral = (kName == "minadd" and val == 0) or ((kName == "stop" or kName == "target") and val == 1)
+                if not neutral
+                    nChanges += 1
 adj(string key) =>
     int i = array.indexof(adjKeys, key)
     i >= 0 ? array.get(adjVals, i) : 0.0
@@ -458,12 +471,22 @@ p5 = plot(showLines and inSess ? e5 : na, "EMA 5", color = color.new(color.teal,
 p12 = plot(showLines and inSess ? e12 : na, "EMA 12", color = color.new(color.teal, 60), style = plot.style_linebr)
 fill(p5, p12, color = e5 >= e12 ? color.new(color.teal, 80) : color.new(color.red, 80))
 
-var table info = table.new(position.bottom_right, 1, 5, bgcolor = color.new(#0a0e14, 10), border_width = 0)
+// The results so far, on the chart itself (they move with Bar Replay too). The Strategy Tester has every trade.
+string boxPos = boxWhere == "Top right" ? position.top_right : boxWhere == "Bottom right" ? position.bottom_right : boxWhere == "Bottom left" ? position.bottom_left : position.top_left
+var table info = table.new(boxPos, 1, 6, bgcolor = color.new(#0a0e14, 10), border_width = 0)
 if barstate.islast
     if not is5
         table.cell(info, 0, 0, "INDAI Backtest needs a 5-minute chart", text_color = color.orange, text_size = size.normal)
     else
-        table.cell(info, 0, 0, "INDAI · score line " + str.tostring(scoreLine, "#") + (array.size(adjKeys) > 0 ? " · " + str.tostring(array.size(adjKeys)) + " changes applied" : " · scanner as it comes"), text_color = #dcbf6e, text_size = size.small, text_halign = text.align_left)
-        table.cell(info, 0, 1, "Alerts " + str.tostring(nAlerts) + " · trades taken " + str.tostring(nTaken), text_color = color.white, text_size = size.small, text_halign = text.align_left)
-        table.cell(info, 0, 2, "Skipped: already in a trade " + str.tostring(nBusy) + " · over the hourly limit " + str.tostring(nQuiet), text_color = color.gray, text_size = size.small, text_halign = text.align_left)
-        table.cell(info, 0, 3, "All the numbers are in the Strategy Tester tab", text_color = color.gray, text_size = size.small, text_halign = text.align_left)
+        int closedN = strategy.closedtrades
+        float net = strategy.netprofit
+        string changesText = nChanges > 0 ? " · " + str.tostring(nChanges) + (nChanges == 1 ? " change applied" : " changes applied") : " · scanner as it comes"
+        string rateText = closedN > 0 ? " · win rate " + str.tostring(math.round(100.0 * strategy.wintrades / closedN)) + "%" : ""
+        string pfText = strategy.grossloss > 0 ? " · profit factor " + str.tostring(math.round(strategy.grossprofit / strategy.grossloss, 2)) : ""
+        string netText = (net < 0 ? "-$" : "+$") + str.tostring(math.round(math.abs(net))) + " (" + str.tostring(math.round(net / riskUsd, 1)) + "R)"
+        table.cell(info, 0, 0, "INDAI · score line " + str.tostring(scoreLine, "#") + changesText, text_color = #dcbf6e, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 1, "Trades " + str.tostring(closedN) + " · won " + str.tostring(strategy.wintrades) + " · lost " + str.tostring(strategy.losstrades) + rateText, text_color = color.white, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 2, "Result " + netText + pfText, text_color = net < 0 ? color.red : color.teal, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 3, "Deepest drawdown $" + str.tostring(math.round(strategy.max_drawdown)) + " · risking $" + str.tostring(math.round(riskUsd)) + " a trade", text_color = color.white, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 4, "Alerts " + str.tostring(nAlerts) + " · traded " + str.tostring(nTaken) + " · not traded: already in one " + str.tostring(nBusy) + ", hourly limit " + str.tostring(nQuiet), text_color = color.gray, text_size = size.small, text_halign = text.align_left)
+        table.cell(info, 0, 5, "Every trade is listed in the Strategy Tester", text_color = color.gray, text_size = size.small, text_halign = text.align_left)

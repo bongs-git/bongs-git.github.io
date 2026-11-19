@@ -33,7 +33,8 @@
     <li>Tap <b>Copy the script</b>. In TradingView (on a computer, or the website in a phone browser) open the <b>Pine Editor</b>, paste it over whatever is there, and press <b>Save</b>, then <b>Add to chart</b>. After that it is under Indicators, My scripts, on every device.</li>
     <li>Use a <b>5-minute chart</b> on regular trading hours. In the strategy's settings set the score line and risk per trade to match your plan.</li>
     <li>In INDAI open Ideas, Retrospective, and tap <b>Copy the changes for TradingView</b>. Paste that line into the strategy's <b>Changes</b> setting. Untick <b>Apply the changes</b> to see the same test without them.</li>
-    <li>The <b>Strategy Tester</b> tab has the numbers. For live simulation press <b>Replay</b>, pick a starting candle and play: the strategy alerts and trades as each candle closes.</li>
+    <li>The box on the chart shows the main results (trades, win rate, result, profit factor, drawdown), and the <b>Strategy Tester</b> tab lists every trade. For live simulation press <b>Replay</b>, pick a starting candle and play: the strategy alerts and trades as each candle closes, and the box keeps count.</li>
+    <li>The numbers TradingView prints beside each trade are shares, not dollars: <b>-163</b> is 163 shares sold short, and <b>+163</b> with "stop" or "target" is those shares bought back there.</li>
   </ol>
   <div class="bar"><button type="button" id="copy">Copy the script</button><a class="btn" href="./indai-backtest.pine" download>Download</a><span id="msg" role="status"></span></div>
   <pre id="code">Loading…</pre>
