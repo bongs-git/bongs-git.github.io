@@ -461,6 +461,10 @@ function initSettings(app) {
     vp.push(vs.ttsReady ? '<span class="ok">Voice ready</span>' : vs.ttsLoad != null ? `<span class="warn">Voice downloading ${vs.ttsLoad}%</span>` : s.voiceEngine === 'system' ? 'Using the browser voice' : 'Voice downloads the first time she speaks (about 90 MB, then cached)');
     vp.push(vs.sttReady ? `<span class="ok">Listening ready (${esc(vs.sttModel || 'on-device')})</span>` : vs.sttLoad != null ? `<span class="warn">Listening model ${vs.sttLoad}%</span>` : v.SR && s.micEngine !== 'whisper' ? 'Listening uses the browser recognizer here' : 'Listening model downloads the first time you talk (about 40 MB)');
     vp.push(self.crossOriginIsolated ? 'Multi-core voice processing is on' : 'Single-core voice processing (multi-core switches on after the first reload where the browser supports it)');
+    const ai = app.audioInfo();
+    vp.push(`Sound: ${!s.voice ? '<span class="warn">muted</span>. Tap the speaker icon in the INDAI panel to hear her' : ai.ctx === 'running' ? '<span class="ok">on</span>' : ai.ctx === 'not started' ? 'starts with your first tap' : '<span class="warn">paused by the phone</span>, tap anywhere to wake it'}${s.voice && ai.session === 'playback' ? ', plays even when the phone is on silent' : ''}${ai.lag != null ? ` · last reply started speaking after ${ai.lag.toFixed(1)} s` : ''}`);
+    if (ai.slow) vp.push('<span class="warn">Using the phone\'s own voice for now:</span> the natural voice was slow to start on this phone. Saving Settings gives it another go.');
+    if (ai.iOS && s.voice) vp.push('Still quiet? Press volume up on the side of the phone while she is talking.');
     if (vs.error) vp.push(`<span class="bad">${esc(vs.error)}</span>`);
     $('voice-status').innerHTML = vp.join('\n');
     const st = ind.speech.stats, fixes = ind.speech.list().slice(0, 6), ears = v.ears || {};

@@ -88,6 +88,87 @@ const say = (...a) => app.indai.say(...a);
   v.listen = async (opts) => { const t = await listen(opts); return t === '' && Date.now() - (app._userStop || 0) < 2500 ? null : t; };
 }
 
+// ------------------------------------------------------------------ being heard, on a phone above all
+// iPhone and iPad (every browser there runs on WebKit) have four ways of leaving her silent, each handled here:
+//   1. The ring/silent switch mutes web audio unless the page says it is playing media: say so (audio session "playback").
+//   2. While the microphone is open the phone plays everything at quiet "call" volume, and the shared voice code keeps
+//      the mic open for 25 seconds after you stop talking, which is exactly when she answers. Let go of the mic the
+//      moment listening ends and switch the session back to playback.
+//   3. Coming back from the lock screen or another app can leave the audio engine stopped ("interrupted", or "running"
+//      with a clock that stands still). Wake it on return and on every tap.
+//   4. The phone's own voice (used while the natural voice downloads) stays silent until a tap has unlocked it.
+// And on any phone: if the natural voice takes several seconds to start talking, use the phone's own voice instead.
+{
+  const v = app.indai.voice, iOS = app.platform.iOS, phone = iOS || /Android/i.test(navigator.userAgent);
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const session = (type) => { try { if (iOS && navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch {} };
+  const audioCtx = v.audioCtx.bind(v);
+  v.audioCtx = () => { const c = audioCtx(); if (c.state !== 'running' && c.state !== 'closed') c.resume().catch(() => {}); return c; };
+  let micWanted = false;                                  // from the tap on the mic until listening has ended
+  const micOn = () => micWanted || v.state.listening;
+  if (iOS) {
+    const setState = v.setState.bind(v);
+    v.setState = (p) => {
+      const was = v.state.listening; setState(p);
+      if (was && !v.state.listening) { micWanted = false; try { v._stream?.getTracks().forEach(t => t.stop()); } catch {} v._stream = null; session('playback'); }
+    };
+    const listen = v.listen.bind(v);
+    v.listen = (opts) => {
+      if (!v.state.listening) { micWanted = true; session('play-and-record'); }
+      const p = listen(opts);
+      p.catch(() => {}).then(() => { micWanted = false; if (!v.state.listening) session('playback'); });
+      return p;
+    };
+  }
+  let unlocked = false, quietLoop = null, lastWake = 0;
+  // Call from a tap. Safe to call on every tap.
+  app.unlockSound = () => {
+    session(micOn() ? 'play-and-record' : 'playback');
+    if (unlocked) return; unlocked = true;
+    if (iOS || app.platform.safari) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch {} }
+    // Older iPhones without the audio session setting: a silent clip playing in a loop has the same effect on the silent switch.
+    if (iOS && !navigator.audioSession) { try { quietLoop = new Audio('data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//MgxAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVf/zIsQnAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVV//MgxE8AAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVf/zIMR2AAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVX/8yDEnQAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVV//MixMQAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVX/8yDE2AAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVV//MgxNgAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVf/zIMTYAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVX/8yLE1wAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVf/zIMTYAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVX/8yDE2AAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVV//MgxNgAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVf/zIsTXAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVV//MgxNgAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVf/zIMTYAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVX/8yDE2AAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVV//MixNcAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVX/8yDE2AAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVV//MgxNgAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zIMTYAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8yLE1wAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zIMTYAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/8yDE2AAAA0gAAAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV//MgxNgAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ=='); quietLoop.loop = true; quietLoop.preload = 'auto'; quietLoop.setAttribute('x-webkit-airplay', 'deny'); quietLoop.play().catch(() => {}); } catch {} }
+  };
+  app.wakeSound = async (tap = false) => {
+    const c = v.ctx, now = Date.now();
+    if (!c || c.state === 'closed' || now - lastWake < 1200) return;
+    lastWake = now;
+    if (!micOn()) session('playback');
+    if (iOS && !tap) { try { if (!speechSynthesis.speaking) speechSynthesis.cancel(); } catch {} }
+    if (quietLoop && quietLoop.paused && tap) quietLoop.play().catch(() => {});
+    try {
+      if (c.state !== 'running') await Promise.race([c.resume(), wait(500)]);
+      const t = c.currentTime; await wait(180);
+      if (c.state !== 'running' || c.currentTime !== t) return;            // not running yet (needs a tap), or healthy
+      await Promise.race([c.suspend(), wait(400)]); await Promise.race([c.resume(), wait(500)]); await wait(180);
+      // still stuck: start a fresh audio engine (only possible from a tap, and never in the middle of listening or speaking)
+      if (c.currentTime === t && tap && v.ctx === c && !v.playing && !v.state.listening) { try { c.close(); } catch {} v.ctx = null; v.unlock(); }
+    } catch {}
+  };
+  // How long the natural voice takes to start talking. It runs on this device, and on a phone that can be slow.
+  const asked = new Map();
+  let slow = 0;
+  const speak = v.speak.bind(v);
+  v.speak = (text) => { const idle = !v.state.speaking && !v.audioQueue.length, first = v.seq; speak(text); if (idle && v.seq > first) { asked.clear(); asked.set(first, performance.now()); } };
+  const onWorker = v.onWorker.bind(v);
+  v.onWorker = (m) => {
+    if (m.type === 'audio' && asked.has(m.id)) {
+      const lag = (performance.now() - asked.get(m.id)) / 1000, dur = m.samples.length / (m.rate || 24000); asked.delete(m.id);
+      app.voiceLag = lag;
+      slow = lag > 3.5 && lag > dur * 0.8 ? slow + 1 : 0;
+      if (phone && slow >= 2 && !app.slowVoice && app.settings.voiceEngine !== 'system') {
+        app.slowVoice = true;
+        say("The natural voice is slow on this phone, so I'm using the phone's own voice for now. It answers at once. You can change it back under Voice in Settings.", 'info', { speak: false });
+        app.markDirty('settings');
+      }
+    }
+    onWorker(m);
+  };
+  const getSettings = v.getSettings;
+  v.getSettings = () => (app.slowVoice ? { ...getSettings(), voiceEngine: 'system' } : getSettings());
+  app.audioInfo = () => ({ ctx: v.ctx ? v.ctx.state : 'not started', session: iOS && navigator.audioSession ? navigator.audioSession.type : null, lag: app.voiceLag ?? null, slow: !!app.slowVoice, iOS });
+}
+
 // ------------------------------------------------------------------ GEX levels
 // Priority: levels you pasted > this morning's GEX refresh > live from the options chain > an older morning refresh > demo.
 const num = (v) => v == null || v === '' ? null : Number(v);
@@ -300,6 +381,7 @@ app.resetDay = () => { app.day = freshDay(); persistDay(); app.markDirty('all');
 // ------------------------------------------------------------------ INDAI actions
 function firstGesture() {
   app.indai.voice.unlock();
+  app.unlockSound();
   if (firstGesture.done) return;
   firstGesture.done = true;
   if (!app.indai.muted && !navigator.connection?.saveData) app.indai.voice.preload({ tts: true });
@@ -790,6 +872,7 @@ app.applySettings = (prev) => {
   app.saveSettings();
   const changed = !prev || prev.f !== app.settings.finnhubKey || prev.syms !== app.settings.symbols.join(',') || prev.mode !== app.settings.dataMode;
   if (changed) restartFeed();
+  app.slowVoice = false;
   app.indai.setMuted(!app.settings.voice);
   app.markDirty('all');
 };
@@ -866,7 +949,7 @@ function refreshNow() {
   lastBridge = 0; lastTV = 0;
 }
 app.refreshNow = refreshNow;
-window.addEventListener('pageshow', (e) => { if (e.persisted) refreshNow(); });
+window.addEventListener('pageshow', (e) => { if (e.persisted) { refreshNow(); app.wakeSound?.(); } });
 
 // ------------------------------------------------------------------ boot
 async function boot() {
@@ -887,13 +970,13 @@ async function boot() {
   say('Ask me about a trade, like “QQQ calls expiring today, 665 strike”. Tap the mic, hold the space bar, or just type.', 'info', { speak: false });
   // audio is only allowed after a tap or key press: unlock it on the first one
   // (a touch only counts as a user action when the finger lifts, so listen for the end of the tap)
-  const first = () => { const v = app.indai.voice; if (!firstGesture.done) firstGesture(); else { if (v.ctx && v.ctx.state !== 'running') v.unlock(); maybeCheckIn(); } };
+  const first = () => { const v = app.indai.voice; if (!firstGesture.done) firstGesture(); else { if (v.ctx && v.ctx.state !== 'running') v.unlock(); app.unlockSound(); app.wakeSound(true); maybeCheckIn(); } };
   for (const ev of ['pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(ev, first, { passive: true });
   // keyboard push-to-talk: hold the space bar (when not typing in a field)
   const typing = () => /INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable;
   window.addEventListener('keydown', (ev) => { if (ev.code === 'Space' && !ev.repeat && !typing()) { ev.preventDefault(); if (!app.indai.listening) app.talk(); } });
   window.addEventListener('keyup', (ev) => { if (ev.code === 'Space' && !typing() && app.indai.voice.state.listening) { app._userStop = Date.now(); app.indai.voice.stop(); } });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); refreshNow(); tick(); if (Date.now() - lastProbe > 8000) reconnect(); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); refreshNow(); tick(); app.wakeSound(); if (Date.now() - lastProbe > 8000) reconnect(); } });
   if (document.fonts?.ready) document.fonts.ready.then(() => app.markDirty('all'));
   // another tab (or the Quest app in this same browser) logged a trade or locked a plan: pick it up
   window.addEventListener('storage', (e) => { if (e.key === 'jarvis.day.v1') { app.day = loadDay(); if (!app.indai.awaiting) app.planDraft = defaultDraft(); app.markDirty('all'); } });
