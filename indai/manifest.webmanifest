@@ -1,0 +1,22 @@
+{
+  "name": "INDAI",
+  "short_name": "INDAI",
+  "description": "INDAI: your voice-driven options trading command center for phone, tablet and laptop. Charts with GEX levels, trade ratings, an options profit calculator, a daily game plan and a risk breaker.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050709",
+  "theme_color": "#050709",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Options calculator", "url": "./?calc=1" },
+    { "name": "Self-test", "url": "./?selftest=1" }
+  ]
+}

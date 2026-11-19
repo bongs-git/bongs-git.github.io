@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>INDAI</title>
+<meta name="description" content="INDAI, your voice-driven options trading command center, for phone, tablet and laptop: charts with GEX levels, trade ratings, an options profit calculator, a daily game plan and a risk breaker.">
+<meta name="theme-color" content="#050709">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="INDAI">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="preload" href="./fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="./fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body data-tab="chart">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ic-mic" viewBox="0 0 24 24"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-5a3.5 3.5 0 1 0-7 0v5A3.5 3.5 0 0 0 12 15Z" fill="currentColor"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="ic-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></symbol>
+  <symbol id="ic-send" viewBox="0 0 24 24"><path d="M5 12h13M12.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="ic-left" viewBox="0 0 24 24"><path d="M14.5 6 8.5 12l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-list" viewBox="0 0 24 24"><path d="M4 7h10M4 12h16M4 17h7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="m16 18 2-2.5 1.5 1.2L22 13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-candles" viewBox="0 0 24 24"><path d="M7 3v3m0 9v4M17 5v4m0 7v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="4.5" y="6" width="5" height="9" rx="1.2" fill="currentColor"/><rect x="14.5" y="9" width="5" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="ic-indai" viewBox="0 0 24 24"><path d="M4 4.5h3.5M4 4.5V8M20 4.5h-3.5M20 4.5V8M4 19.5h3.5M4 19.5V16M20 19.5h-3.5M20 19.5V16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8 17 12 7l4 10M9.7 13.5h4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-plan" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="ic-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="18.5" cy="12" r="1.8" fill="currentColor"/></symbol>
+  <symbol id="ic-sound" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4Z" fill="currentColor"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="ic-mute" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4Z" fill="currentColor"/><path d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="ic-dive" viewBox="0 0 24 24"><path d="M9 4H5a1 1 0 0 0-1 1v4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4M15 20h4a1 1 0 0 0 1-1v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/></symbol>
+  <symbol id="ic-out" viewBox="0 0 24 24"><path d="M10 5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4M14 5h5v5M19 5l-8 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<header class="top" id="top">
+  <a class="brand" href="./" aria-label="INDAI home"><img src="./brand/indai-logo.png" alt="INDAI" width="1380" height="350"></a>
+  <div class="mkt">
+    <span class="clock mono" id="t-clock">&nbsp;</span>
+    <span class="mstate" id="t-state"><i></i><span id="t-state-text">&nbsp;</span></span>
+  </div>
+  <button type="button" class="badge" id="t-badge" title="Where prices come from">&nbsp;</button>
+  <nav class="top-actions" aria-label="Tools">
+    <button type="button" class="btn quiet" data-act="brief">Brief me</button>
+    <button type="button" class="btn quiet" data-act="calc">Calculator</button>
+    <button type="button" class="btn quiet" data-act="summary">Summary</button>
+    <button type="button" class="btn quiet" data-act="selftest">Self-test</button>
+    <button type="button" class="btn quiet" data-act="install" id="t-install" hidden>Install app</button>
+    <button type="button" class="btn quiet" data-act="settings">Settings</button>
+  </nav>
+</header>
+
+<main id="app">
+  <section class="view" data-view="watch">
+    <article class="panel" id="p-watch" aria-labelledby="h-watch">
+      <header class="ph">
+        <h2 id="h-watch">Watchlist</h2>
+        <form class="addsym" id="w-add" autocomplete="off"><input id="w-add-in" type="text" maxlength="6" placeholder="Add ticker" aria-label="Add a ticker to the watchlist" autocapitalize="characters" spellcheck="false"><button type="submit" class="btn mini">Add</button></form>
+      </header>
+      <div class="wrows" id="w-rows" role="list"></div>
+    </article>
+    <article class="panel" id="p-leadlag" aria-labelledby="h-ll">
+      <header class="ph"><h2 id="h-ll">Lead / lag since the open</h2></header>
+      <div class="ll-legend" id="ll-legend"></div>
+      <div class="ll-host"><canvas id="ll-canvas"></canvas></div>
+      <p class="ll-msg" id="ll-msg">&nbsp;</p>
+    </article>
+  </section>
+
+  <section class="view" data-view="chart">
+    <article class="panel framed" id="p-chart" aria-label="Main chart">
+      <header class="chart-head">
+        <div class="quote">
+          <button type="button" class="icon-btn" id="ch-prev" aria-label="Previous ticker"><svg><use href="#ic-left"/></svg></button>
+          <h2 id="ch-sym">&nbsp;</h2>
+          <button type="button" class="icon-btn" id="ch-next" aria-label="Next ticker"><svg><use href="#ic-right"/></svg></button>
+          <span class="mono last" id="ch-last">—</span>
+          <span class="mono chg" id="ch-chg">&nbsp;</span>
+          <span class="mono hl" id="ch-hl">&nbsp;</span>
+        </div>
+        <div class="chart-tools">
+          <div class="seg" id="ch-tf" role="group" aria-label="Candle size">
+            <button type="button" data-iv="1min">1m</button><button type="button" data-iv="5min">5m</button><button type="button" data-iv="15min">15m</button>
+          </div>
+          <div class="seg toggles" id="ch-show" role="group" aria-label="Chart overlays">
+            <button type="button" data-show="ema" class="t-ema">EMA</button><button type="button" data-show="vwap" class="t-vwap">VWAP</button><button type="button" data-show="gex" class="t-gex">GEX</button>
+          </div>
+          <span class="spacer"></span>
+          <button type="button" class="btn mini" id="ch-deep"><svg><use href="#ic-dive"/></svg><span>Deep dive</span></button>
+          <button type="button" class="btn mini" id="ch-tv"><svg><use href="#ic-out"/></svg><span>TradingView</span></button>
+        </div>
+      </header>
+      <div class="chart-host" id="chart-host">
+        <canvas class="base"></canvas><canvas class="over"></canvas>
+        <span class="chart-note" id="ch-note"></span>
+      </div>
+    </article>
+    <article class="panel" id="p-levels" aria-labelledby="h-lv">
+      <header class="ph"><h2 id="h-lv">GEX levels</h2></header>
+      <div class="lv-rows" id="lv-rows"></div>
+      <p class="lv-regime" id="lv-regime">&nbsp;</p>
+      <p class="lv-src" id="lv-src">&nbsp;</p>
+    </article>
+  </section>
+
+  <section class="view" data-view="indai">
+    <article class="panel" id="p-indai" aria-labelledby="h-indai">
+      <header class="ph">
+        <h2 id="h-indai">INDAI</h2>
+        <span class="pill" id="i-state">Ready</span>
+        <span class="spacer"></span>
+        <button type="button" class="icon-btn" id="i-mute" aria-label="Mute INDAI's voice" aria-pressed="false"><svg><use href="#ic-sound"/></svg></button>
+      </header>
+      <p class="loads" id="i-loads" hidden></p>
+      <div class="pin" id="i-pin" hidden></div>
+      <div class="log" id="i-log" role="log" aria-live="polite" aria-label="Conversation with INDAI" tabindex="0"></div>
+      <p class="heard" id="i-heard" hidden></p>
+      <div class="chips" id="i-chips">
+        <button type="button" data-say="brief me">Brief me</button>
+        <button type="button" data-say="start my day">Start my day</button>
+        <button type="button" data-say="how's the market">Market temperature</button>
+        <button type="button" data-say="practice alert">Practice alert</button>
+        <button type="button" data-say="what do you remember">What do you remember</button>
+        <button type="button" data-say="run a self-test">Self-test</button>
+      </div>
+      <form class="composer" id="i-form" autocomplete="off">
+        <input id="i-input" type="text" placeholder="Ask INDAI or type a trade idea" aria-label="Message INDAI" enterkeyhint="send" autocapitalize="sentences" spellcheck="false">
+        <button type="submit" class="send" aria-label="Send"><svg><use href="#ic-send"/></svg></button>
+        <button type="button" class="mic" id="i-mic" aria-label="Talk to INDAI"><svg><use href="#ic-mic"/></svg></button>
+      </form>
+    </article>
+  </section>
+
+  <section class="view" data-view="plan">
+    <article class="panel" id="p-today" aria-labelledby="h-today">
+      <header class="ph"><h2 id="h-today">Today's plan</h2><span class="pill" id="td-temp" hidden></span></header>
+      <div id="td-body"></div>
+    </article>
+    <article class="panel" id="p-risk" aria-labelledby="h-risk">
+      <header class="ph"><h2 id="h-risk">Risk breaker</h2><span class="pill good" id="r-state">Armed</span></header>
+      <div class="rbody" id="r-body">
+        <div class="r-pnl"><span class="lbl">Day P&amp;L</span><span class="mono big" id="r-pnl">$0</span><span class="sub" id="r-trades">0 trades</span></div>
+        <div class="r-limit"><div class="bar"><i id="r-bar"></i></div><p id="r-limit">&nbsp;</p></div>
+        <div class="r-consec"><span class="lbl">Losses in a row</span><span class="dots" id="r-dots"></span><span class="sub" id="r-cool">&nbsp;</span></div>
+        <div class="r-log">
+          <div class="stepper"><button type="button" id="r-amt-dn" aria-label="Smaller amount">−</button><input id="r-amt" class="mono" type="text" inputmode="decimal" aria-label="Trade result in dollars"><button type="button" id="r-amt-up" aria-label="Larger amount">+</button></div>
+          <button type="button" class="btn" id="r-undo">Undo</button>
+          <button type="button" class="btn up" id="r-win">Win</button>
+          <button type="button" class="btn down" id="r-loss">Loss</button>
+        </div>
+        <div class="r-size">
+          <p class="lbl">Position sizer <span class="sub" id="r-size-sub"></span></p>
+          <div class="stepper"><button type="button" id="r-prem-dn" aria-label="Lower premium">−</button><span class="mono val" id="r-prem">$1.00</span><button type="button" id="r-prem-up" aria-label="Higher premium">+</button></div>
+          <div class="r-max"><b id="r-max">—</b><span id="r-max-sub">&nbsp;</span></div>
+        </div>
+        <div class="r-check" id="r-check" role="group" aria-label="Setup checklist"></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="view" data-view="more">
+    <article class="panel" id="p-more" aria-labelledby="h-more">
+      <header class="ph"><h2 id="h-more">More</h2></header>
+      <div class="more-list" id="more-list"></div>
+      <p class="fine">INDAI's analysis is information, not financial advice. You make every trade.</p>
+    </article>
+  </section>
+</main>
+
+<div id="scrim" hidden></div>
+<div id="sheets">
+  <section class="sheet" id="s-analysis" role="dialog" aria-modal="false" aria-labelledby="st-analysis" hidden><header class="sh"><h2 id="st-analysis">INDAI analysis</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-analysis"></div></section>
+  <section class="sheet" id="s-deep" role="dialog" aria-modal="false" aria-labelledby="st-deep" hidden><header class="sh"><h2 id="st-deep">Deep dive</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-deep"></div></section>
+  <section class="sheet" id="s-calc" role="dialog" aria-modal="false" aria-labelledby="st-calc" hidden><header class="sh"><h2 id="st-calc">Options profit calculator</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-calc"></div></section>
+  <section class="sheet" id="s-summary" role="dialog" aria-modal="false" aria-labelledby="st-summary" hidden><header class="sh"><h2 id="st-summary">Everything at a glance</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-summary"></div></section>
+  <section class="sheet" id="s-plan" role="dialog" aria-modal="false" aria-labelledby="st-plan" hidden><header class="sh"><h2 id="st-plan">Today's game plan</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-plan"></div></section>
+  <section class="sheet" id="s-selftest" role="dialog" aria-modal="false" aria-labelledby="st-selftest" hidden><header class="sh"><h2 id="st-selftest">Self-test</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-selftest"></div></section>
+  <section class="sheet" id="s-settings" role="dialog" aria-modal="false" aria-labelledby="st-settings" hidden><header class="sh"><h2 id="st-settings">Settings</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-settings"></div></section>
+</div>
+
+<button type="button" id="caption" hidden></button>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<button type="button" id="fab" class="fab" aria-label="Talk to INDAI"><span class="ring"></span><svg><use href="#ic-mic"/></svg></button>
+
+<nav class="tabs" id="tabs" aria-label="Screens">
+  <button type="button" data-tab="watch"><svg><use href="#ic-list"/></svg><span>Watch</span></button>
+  <button type="button" data-tab="chart"><svg><use href="#ic-candles"/></svg><span>Chart</span></button>
+  <button type="button" data-tab="indai"><svg><use href="#ic-indai"/></svg><span>INDAI</span><i class="dot" id="tab-dot" hidden></i></button>
+  <button type="button" data-tab="plan"><svg><use href="#ic-plan"/></svg><span>Plan</span></button>
+  <button type="button" data-tab="more"><svg><use href="#ic-more"/></svg><span>More</span></button>
+</nav>
+
+<noscript><p style="padding:24px;color:#f3f1ea;font-family:system-ui">INDAI needs JavaScript turned on.</p></noscript>
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
