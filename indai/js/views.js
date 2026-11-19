@@ -68,7 +68,7 @@ export function initViews(app) {
       app.tab = tab; body.dataset.tab = tab;
       for (const b of tabs.children) b.classList.toggle('on', b.dataset.tab === tab);
       if (app.layout === 'phone') window.scrollTo(0, 0);
-      if (tab === 'indai') { unseen = false; hideCap(); requestAnimationFrame(() => { const l = $('i-log'); l.scrollTop = l.scrollHeight; }); }
+      if (tab === 'indai') { unseen = false; hideCap(); requestAnimationFrame(() => { const l = $('i-log'); l.scrollTop = l.scrollHeight; l.dispatchEvent(new Event('scroll')); }); }
       app.markDirty('all');
     },
     openSheet(id) {
@@ -330,12 +330,17 @@ export function initViews(app) {
   const log = $('i-log'), form = $('i-form'), input = $('i-input');
   let lastMsg = null, pinKey = '';
   const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 90;
+  // Stay on the newest line unless the person scrolled up to read, including when a card above the log
+  // appears and makes the log shorter.
+  let atBottom = true;
+  log.addEventListener('scroll', () => { atBottom = nearBottom(); }, { passive: true });
+  new ResizeObserver(() => { if (atBottom) log.scrollTop = log.scrollHeight; }).observe(log);
   function appendMsgs() {
     const msgs = ind.log;
     let i = lastMsg ? msgs.indexOf(lastMsg) : -1;
     if (lastMsg && i < 0) { log.textContent = ''; i = -1; }
     if (i === msgs.length - 1) return;
-    const stick = nearBottom() || msgs[msgs.length - 1].kind === 'you';
+    const stick = atBottom || msgs[msgs.length - 1].kind === 'you';
     const frag = document.createDocumentFragment();
     for (let k = i + 1; k < msgs.length; k++) {
       const m = msgs[k], d = document.createElement('div');
@@ -346,7 +351,7 @@ export function initViews(app) {
     log.appendChild(frag);
     while (log.children.length > 80) log.firstChild.remove();
     lastMsg = msgs[msgs.length - 1];
-    if (stick) log.scrollTop = log.scrollHeight;
+    if (stick) { log.scrollTop = log.scrollHeight; atBottom = true; }
   }
   function pinCard() {
     const an = app.analysis, sig = app.signals[0], pin = $('i-pin');
