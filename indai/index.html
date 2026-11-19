@@ -90,9 +90,10 @@
           <div class="seg toggles" id="ch-show" role="group" aria-label="Chart overlays">
             <button type="button" data-show="ema" class="t-ema">EMA</button><button type="button" data-show="vwap" class="t-vwap">VWAP</button><button type="button" data-show="gex" class="t-gex">GEX</button>
           </div>
-          <span class="spacer"></span>
+        </div>
+        <div class="chart-actions">
           <button type="button" class="btn mini" id="ch-deep"><svg><use href="#ic-dive"/></svg><span>Deep dive</span></button>
-          <button type="button" class="btn mini" id="ch-tv"><svg><use href="#ic-out"/></svg><span>TradingView</span></button>
+          <button type="button" class="btn mini" id="ch-tv"><svg><use href="#ic-out"/></svg><span>Open in TradingView</span></button>
         </div>
       </header>
       <div class="chart-host" id="chart-host">
@@ -174,13 +175,13 @@
 
 <div id="scrim" hidden></div>
 <div id="sheets">
-  <section class="sheet" id="s-analysis" role="dialog" aria-modal="false" aria-labelledby="st-analysis" hidden><header class="sh"><h2 id="st-analysis">INDAI analysis</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-analysis"></div></section>
-  <section class="sheet" id="s-deep" role="dialog" aria-modal="false" aria-labelledby="st-deep" hidden><header class="sh"><h2 id="st-deep">Deep dive</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-deep"></div></section>
-  <section class="sheet" id="s-calc" role="dialog" aria-modal="false" aria-labelledby="st-calc" hidden><header class="sh"><h2 id="st-calc">Options profit calculator</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-calc"></div></section>
-  <section class="sheet" id="s-summary" role="dialog" aria-modal="false" aria-labelledby="st-summary" hidden><header class="sh"><h2 id="st-summary">Everything at a glance</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-summary"></div></section>
-  <section class="sheet" id="s-plan" role="dialog" aria-modal="false" aria-labelledby="st-plan" hidden><header class="sh"><h2 id="st-plan">Today's game plan</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-plan"></div></section>
-  <section class="sheet" id="s-selftest" role="dialog" aria-modal="false" aria-labelledby="st-selftest" hidden><header class="sh"><h2 id="st-selftest">Self-test</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-selftest"></div></section>
-  <section class="sheet" id="s-settings" role="dialog" aria-modal="false" aria-labelledby="st-settings" hidden><header class="sh"><h2 id="st-settings">Settings</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-settings"></div></section>
+  <section class="sheet" id="sheet-analysis" role="dialog" aria-modal="false" aria-labelledby="st-analysis" hidden><header class="sh"><h2 id="st-analysis">INDAI analysis</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-analysis"></div></section>
+  <section class="sheet" id="sheet-deep" role="dialog" aria-modal="false" aria-labelledby="st-deep" hidden><header class="sh"><h2 id="st-deep">Deep dive</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-deep"></div></section>
+  <section class="sheet" id="sheet-calc" role="dialog" aria-modal="false" aria-labelledby="st-calc" hidden><header class="sh"><h2 id="st-calc">Options profit calculator</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-calc"></div></section>
+  <section class="sheet" id="sheet-summary" role="dialog" aria-modal="false" aria-labelledby="st-summary" hidden><header class="sh"><h2 id="st-summary">Everything at a glance</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-summary"></div></section>
+  <section class="sheet" id="sheet-plan" role="dialog" aria-modal="false" aria-labelledby="st-plan" hidden><header class="sh"><h2 id="st-plan">Today's game plan</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-plan"></div></section>
+  <section class="sheet" id="sheet-selftest" role="dialog" aria-modal="false" aria-labelledby="st-selftest" hidden><header class="sh"><h2 id="st-selftest">Self-test</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-selftest"></div></section>
+  <section class="sheet" id="sheet-settings" role="dialog" aria-modal="false" aria-labelledby="st-settings" hidden><header class="sh"><h2 id="st-settings">Settings</h2><button type="button" class="icon-btn close" aria-label="Close"><svg><use href="#ic-x"/></svg></button></header><div class="sb" id="sb-settings"></div></section>
 </div>
 
 <button type="button" id="caption" hidden></button>

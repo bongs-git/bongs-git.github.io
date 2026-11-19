@@ -78,6 +78,10 @@ const say = (...a) => app.indai.say(...a);
 {
   const ind = app.indai, talk = ind.talk.bind(ind);
   ind.talk = (opts) => { if (!app._tapTalk && app.inputMode === 'typed') return Promise.resolve(); return talk(opts); };
+  // Tapping the mic again (or letting go of the space bar) before saying anything simply closes the mic:
+  // no "I didn't catch that", and no listening again straight after.
+  const v = ind.voice, listen = v.listen.bind(v);
+  v.listen = async (opts) => { const t = await listen(opts); return t === '' && Date.now() - (app._userStop || 0) < 2500 ? null : t; };
 }
 
 // ------------------------------------------------------------------ GEX levels
@@ -298,6 +302,7 @@ app.firstGesture = firstGesture;
 app.talk = () => {
   firstGesture();
   app.inputMode = 'voice';
+  if (app.indai.voice.state.listening) app._userStop = Date.now();
   app._tapTalk = true;
   try { return app.indai.talk(); } finally { app._tapTalk = false; }
 };
@@ -831,13 +836,13 @@ async function boot() {
     : `Hi ${app.settings.name}, I'm INDAI. Market data is connecting (delayed about 15 minutes).`, 'info', { speak: false });
   say('Ask me about a trade, like “QQQ calls expiring today, 665 strike”. Tap the mic, hold the space bar, or just type.', 'info', { speak: false });
   // audio is only allowed after a tap or key press: unlock it on the first one
-  const first = () => firstGesture();
+  const first = () => { const v = app.indai.voice; if (!firstGesture.done) firstGesture(); else if (v.ctx && v.ctx.state !== 'running') v.unlock(); };
   window.addEventListener('pointerdown', first, { passive: true });
   window.addEventListener('keydown', first);
   // keyboard push-to-talk: hold the space bar (when not typing in a field)
   const typing = () => /INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable;
   window.addEventListener('keydown', (ev) => { if (ev.code === 'Space' && !ev.repeat && !typing()) { ev.preventDefault(); if (!app.indai.listening) app.talk(); } });
-  window.addEventListener('keyup', (ev) => { if (ev.code === 'Space' && !typing() && app.indai.voice.state.listening) app.indai.voice.stop(); });
+  window.addEventListener('keyup', (ev) => { if (ev.code === 'Space' && !typing() && app.indai.voice.state.listening) { app._userStop = Date.now(); app.indai.voice.stop(); } });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); tick(); if (Date.now() - lastProbe > 8000) reconnect(); } });
   if (document.fonts?.ready) document.fonts.ready.then(() => app.markDirty('all'));
 

@@ -68,8 +68,8 @@ export function initViews(app) {
       app.markDirty('all');
     },
     openSheet(id) {
-      const el = $('s-' + id); if (!el) return;
-      if (app.focus && app.focus !== id) $('s-' + app.focus).hidden = true;
+      const el = $('sheet-' + id); if (!el) return;
+      if (app.focus && app.focus !== id) $('sheet-' + app.focus).hidden = true;
       const was = app.focus === id;
       app.focus = id; el.hidden = false;
       $('scrim').hidden = false;
@@ -79,7 +79,7 @@ export function initViews(app) {
     },
     closeSheet() {
       if (!app.focus) return;
-      $('s-' + app.focus).hidden = true; $('scrim').hidden = true;
+      $('sheet-' + app.focus).hidden = true; $('scrim').hidden = true;
       app.focus = null; delete body.dataset.focus;
       app.markDirty('all');
     },
@@ -149,11 +149,13 @@ export function initViews(app) {
         row.classList.toggle('sel', sym === s.main);
         const near = q && lv ? nearestLevel(q.last, lv) : null;
         const nEl = row.querySelector('.w-sym i');
-        setText(nEl, near ? `${near.short} ${near.dist >= 0 ? '+' : ''}${near.dist.toFixed(2)}%` : ' ');
-        nEl.classList.toggle('near', !!near && Math.abs(near.dist) < 0.15);
+        // outside regular hours the extended-hours move takes the small line; otherwise the nearest GEX level
+        const ext = q && q.ext != null;
+        setText(nEl, ext ? `ext ${fmtPct(q.extPct)}` : near ? `${near.short} ${near.dist >= 0 ? '+' : ''}${near.dist.toFixed(2)}%` : '\u00a0');
+        setClass(nEl, ext ? cls(q.extPct) : near && Math.abs(near.dist) < 0.15 ? 'near' : '');
         setText(row.querySelector('.w-px b'), q ? fmtPrice(q.last) : '—');
         const pEl = row.querySelector('.w-px i');
-        setText(pEl, q ? (q.ext != null ? `${fmtPct(q.pct)} · ext ${fmtPct(q.extPct)}` : fmtPct(q.pct)) : 'loading');
+        setText(pEl, q ? fmtPct(q.pct) : 'loading');
         setClass(pEl, q ? cls(q.chg) : 'flat');
         const rev = app.feed.syms.get(sym)?.rev, cv = row.querySelector('canvas');
         if (wRev[sym] !== rev + ':' + cv.clientWidth) { wRev[sym] = rev + ':' + cv.clientWidth; drawSparkline(cv, app.feed.getBars(sym, '5min'), q?.base); }
