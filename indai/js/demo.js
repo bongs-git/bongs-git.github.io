@@ -1,21 +1,26 @@
 // Website-only helpers that sit in front of the shared relay.js without changing it:
-//   1. a circuit breaker, so when the backend cannot be reached nothing waits 20 to 30 seconds per request
+//   1. a fail-fast switch for demo mode only: once INDAI has fallen back to demo prices because the backend
+//      could not be reached, nothing waits 20 to 30 seconds per request. On real data every request always goes
+//      out: a request that dies (weak signal, Safari sent to the background) must never hold back the next one.
 //   2. a simulated options chain for demo mode, so trade analysis, the deep dive and the calculator
 //      can still be used (and tested) with no connection. Everything it produces is flagged as demo data.
 import { relay } from './relay.js';
 import { bs, yearsTo } from './options.js';
 import { etParts, etToMs, isTradingDay, nextTradingDay } from './market.js';
 
-const net = { fails: 0, downUntil: 0, lastOk: 0 };
+const net = { fails: 0, downUntil: 0, lastOk: 0, resumedAt: 0 };
 const isNetworkError = (e) => e instanceof TypeError || e?.name === 'AbortError';
-export const relayDown = () => Date.now() < net.downUntil;
+let demoMode = () => false;
+export const relayDown = () => demoMode() && Date.now() < net.downUntil;
+export function relayReset() { net.fails = 0; net.downUntil = 0; net.resumedAt = Date.now(); }
 
 function guard(fn) {
   return async (...args) => {
     if (relayDown()) { const e = new Error('offline'); e.offline = true; throw e; }
     try { const v = await fn(...args); net.fails = 0; net.lastOk = Date.now(); return v; }
     catch (e) {
-      if (isNetworkError(e)) { net.fails++; if (net.fails >= 2) net.downUntil = Date.now() + 25e3; }
+      // Requests that die while the page is hidden, or just after it comes back, say nothing about the backend.
+      if (isNetworkError(e) && !document.hidden && Date.now() - net.resumedAt > 5000) { net.fails++; if (net.fails >= 2) net.downUntil = Date.now() + 25e3; }
       throw e;
     }
   };
@@ -89,6 +94,10 @@ export function demoChain(app, sym, wantExp = '', range = 0.05) {
 }
 
 export function installRelayGuards(app) {
+  demoMode = () => app.feed.status.mode === 'demo';
+  document.addEventListener('visibilitychange', relayReset);
+  window.addEventListener('online', relayReset);
+  window.addEventListener('pageshow', relayReset);
   for (const k of ['snapshot', 'bars', 'daily', 'news', 'tvAlerts', 'tvBars', 'morningGex']) relay[k] = guard(relay[k].bind(relay));
   const realChain = guard(relay.chain.bind(relay));
   let told = false;

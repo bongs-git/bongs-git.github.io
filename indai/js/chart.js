@@ -66,10 +66,13 @@ export class PriceChart {
     const closes = bars.map(b => b.c);
     const e5 = ema(closes, 5), e12 = ema(closes, 12), e34 = ema(closes, 34), e50 = ema(closes, 50), vw = vwap(bars);
     const idxOf = (b) => Math.round((b.t - sess.open) / ivMs);
+    // Fit the chart to the session so far, with room to the right, instead of leaving most of it empty in the morning.
     // On a narrow screen, show the most recent stretch at a readable candle width instead of squeezing the whole day in.
-    let slots = Math.max(bars.length, Math.ceil((sess.close - sess.open) / ivMs)), first = 0;
+    const full = Math.max(bars.length, Math.ceil((sess.close - sess.open) / ivMs)), li = idxOf(bars[bars.length - 1]);
+    const minSlots = { '1min': 45, '5min': 30, '15min': 14 }[iv] || 30;
+    let slots = Math.min(full, Math.max(minSlots, Math.ceil((li + 1) * 1.3) + 1)), first = 0;
     const maxSlots = Math.max(30, Math.floor(plot.w / 3.4));
-    if (slots > maxSlots) { const li = idxOf(bars[bars.length - 1]); first = Math.max(0, Math.min(slots - maxSlots, li - Math.floor(maxSlots * 0.86))); slots = maxSlots; }
+    if (slots > maxSlots) { first = Math.max(0, Math.min(full - maxSlots, li - Math.floor(maxSlots * 0.86))); slots = maxSlots; }
     const cw = plot.w / slots;
     const xi = (i) => plot.x + (i - first + 0.5) * cw;
     const pts = bars.map((b, k) => ({ b, k, i: idxOf(b) })).filter(p => p.i >= first && p.i < first + slots);
@@ -132,15 +135,41 @@ export class PriceChart {
       ctx.stroke(); ctx.setLineDash([]);
     }
     ctx.restore();
-    if (s.show.vwap) { const lp = pts[pts.length - 1]; txt(ctx, 'VWAP', Math.max(plot.x + 34, xi(lp.i) - 6), Math.min(plot.y + plot.h - 4, yv(vw[lp.k]) + 14), { size: 10, weight: 600, color: C.gold, align: 'right' }); }
+    // Labels go where they don't cover each other: each one tries its usual spot, then the other side, then under its line.
+    const placed = [];
+    const label = (str, side, y, { size = 11, color = C.text, spots = null } = {}) => {
+      ctx.font = `600 ${size}px ${F.sans}`;
+      const tw = ctx.measureText(str).width, other = side === 'left' ? 'right' : 'left';
+      const tries = spots || [[side, y - 5], [other, y - 5], [side, y + size + 3], [other, y + size + 3]];
+      let pick = null;
+      for (const [sd, ty] of tries) {
+        const x0 = typeof sd === 'number' ? sd : sd === 'left' ? plot.x + 6 : plot.x + plot.w - 6 - tw;
+        const box = { x0: x0 - 3, x1: x0 + tw + 3, y0: ty - size, y1: ty + 3 };
+        if (box.y0 < plot.y - 2 || box.y1 > plot.y + plot.h + 2 || box.x0 < plot.x || box.x1 > plot.x + plot.w) continue;
+        if (!pick) pick = box;
+        if (!placed.some(b => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0)) { pick = box; break; }
+      }
+      if (!pick) return;
+      placed.push(pick);
+      ctx.fillStyle = 'rgba(5,7,9,0.72)'; ctx.fillRect(pick.x0, pick.y0 - 1, pick.x1 - pick.x0, pick.y1 - pick.y0 + 1);
+      txt(ctx, str, pick.x0 + 3, pick.y1 - 3, { size, weight: 600, color });
+    };
+    if (s.show.vwap) {
+      // to the right of the last candle when there is room, otherwise just left of it, below the line
+      const lp = pts[pts.length - 1], vx = xi(lp.i), vy = yv(vw[lp.k]);
+      label('VWAP', 'right', vy, { size: 10, color: C.gold, spots: [[vx + 8, vy + 4], [vx + 8, vy - 8], [Math.max(plot.x + 4, vx - 40), vy + 15], [Math.max(plot.x + 4, vx - 40), vy - 8]] });
+    }
     if (lv) {
+      const shown = [];
       for (const l of lines) {
         if (l.v > hi || l.v < lo) { if (l.main) offscreen.push(`${l.name} ${fmtPrice(l.v)} ${l.v > hi ? '↑' : '↓'}`); continue; }
         const y = Math.round(yv(l.v)) + 0.5;
         ctx.strokeStyle = l.col; ctx.lineWidth = l.w; ctx.setLineDash(l.dotted ? [2, 5] : [9, 6]);
         ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke(); ctx.setLineDash([]);
-        txt(ctx, `${l.name} ${fmtPrice(l.v)}`, l.dotted ? plot.x + plot.w - 6 : plot.x + 6, y - 5, { size: l.main ? 11 : 10, weight: 600, color: l.col, align: l.dotted ? 'right' : 'left' });
+        shown.push({ l, y });
       }
+      // main walls and the flip get first pick of the label spots
+      for (const { l, y } of shown.sort((a, b) => (b.l.main ? 1 : 0) - (a.l.main ? 1 : 0))) label(`${l.name} ${fmtPrice(l.v)}`, l.dotted ? 'right' : 'left', y, { size: l.main ? 11 : 10, color: l.col });
       if (offscreen.length) txt(ctx, offscreen.join('   '), plot.x + plot.w - 6, plot.y + 12, { size: 10.5, color: C.dim, align: 'right' });
       txt(ctx, levelSourceLabel(lv), plot.x + plot.w - 6, plot.y + plot.h - 6, { size: 10, color: lv.source === 'demo' ? C.amber : C.faint, align: 'right' });
     }
@@ -214,7 +243,9 @@ export function drawLeadLag(canvas, series) {
   const sess = chartSession();
   let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
   const pad = (hi - lo) * 0.12 || 0.1; lo -= pad; hi += pad;
-  const xt = (t) => ((t - sess.open) / (sess.close - sess.open)) * (w - 2) + 1;
+  const lastT = Math.max(...series.flatMap(s => s.pts.map(p => p.t)));
+  const end = Math.min(sess.close, Math.max(sess.open + 150 * 60e3, sess.open + (lastT - sess.open) * 1.25));   // the session so far, with room to the right
+  const xt = (t) => ((t - sess.open) / (end - sess.open)) * (w - 2) + 1;
   const yv = (v) => h - 2 - ((v - lo) / (hi - lo)) * (h - 4);
   ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(0, Math.round(yv(0)) + 0.5); ctx.lineTo(w, Math.round(yv(0)) + 0.5); ctx.stroke(); ctx.setLineDash([]);

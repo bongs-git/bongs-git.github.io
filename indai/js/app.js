@@ -832,6 +832,8 @@ function tick() {
   if (now - lastBridge > (marketStatus().state === 'closed' ? 60000 : 8000)) { lastBridge = now; pollBridge(); }
   if (now - lastScan > 15000) { lastScan = now; try { scanTick(); } catch (e) { console.warn('scan', e); } }
   if (now - lastProbe > 45000) reconnect();
+  // a quote pull failed: try again in a few seconds rather than leaving stale prices up until the next scheduled one
+  if (app.feed.status.mode !== 'demo' && app.feed.status.cboe === 'err' && !document.hidden && now - lastRefresh > 4000) refreshNow();
 }
 // If INDAI fell back to demo prices because the network was down at launch, keep trying and switch back by herself.
 let lastProbe = Date.now();
@@ -847,7 +849,20 @@ async function reconnect() {
   relay.brainStatus().then(b => { app.indai.brain = { ...b, checked: true }; app.markDirty('indai'); app.markDirty('settings'); });
   say('Market data is back. Switching from demo prices to real ones.', 'good', { speak: false });
 }
-window.addEventListener('online', () => setTimeout(reconnect, 1500));
+window.addEventListener('online', () => { setTimeout(reconnect, 1500); refreshNow(); });
+// Coming back to the app (phone unlocked, tab switched back, signal returned): pull fresh prices straight away
+// instead of waiting for the next scheduled poll, and forget any request that died while it was away.
+let lastRefresh = 0;
+function refreshNow() {
+  const f = app.feed;
+  if (f.status.mode === 'demo' || document.hidden) return;
+  lastRefresh = Date.now();
+  f.lastSnap = 0; f.lastBarsMain = 0;            // these gate the shared feed's next quote and candle pull
+  f.cboeTick();
+  lastBridge = 0; lastTV = 0;
+}
+app.refreshNow = refreshNow;
+window.addEventListener('pageshow', (e) => { if (e.persisted) refreshNow(); });
 
 // ------------------------------------------------------------------ boot
 async function boot() {
@@ -874,7 +889,7 @@ async function boot() {
   const typing = () => /INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement?.tagName || '') || document.activeElement?.isContentEditable;
   window.addEventListener('keydown', (ev) => { if (ev.code === 'Space' && !ev.repeat && !typing()) { ev.preventDefault(); if (!app.indai.listening) app.talk(); } });
   window.addEventListener('keyup', (ev) => { if (ev.code === 'Space' && !typing() && app.indai.voice.state.listening) { app._userStop = Date.now(); app.indai.voice.stop(); } });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); tick(); if (Date.now() - lastProbe > 8000) reconnect(); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { app.markDirty('all'); refreshNow(); tick(); if (Date.now() - lastProbe > 8000) reconnect(); } });
   if (document.fonts?.ready) document.fonts.ready.then(() => app.markDirty('all'));
   // another tab (or the Quest app in this same browser) logged a trade or locked a plan: pick it up
   window.addEventListener('storage', (e) => { if (e.key === 'jarvis.day.v1') { app.day = loadDay(); if (!app.indai.awaiting) app.planDraft = defaultDraft(); app.markDirty('all'); } });

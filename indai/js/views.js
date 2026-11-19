@@ -46,7 +46,7 @@ export function initViews(app) {
 
   // ------------------------------------------------------------ toast + caption
   const toastEl = $('toast');
-  app.toast = (msg) => { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastEl._h); toastEl._h = setTimeout(() => toastEl.classList.remove('show'), 2800); };
+  app.toast = (msg) => { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastEl._h); toastEl._h = setTimeout(() => toastEl.classList.remove('show'), Math.min(7000, 2400 + msg.length * 35)); };
   const cap = $('caption');
   let capMode = null, unseen = false;
   const hideCap = () => { cap.hidden = true; capMode = null; };
@@ -116,17 +116,30 @@ export function initViews(app) {
 
   // ------------------------------------------------------------ top bar
   const V = app.views;
+  let errSince = 0;
   V.top = {
     gap: 200,
     render() {
       const ms = marketStatus(), st = app.feed.status, bridge = app.feed.bridgeLive;
       setText($('t-clock'), fmtClock() + ' ET');
       const short = ms.state === 'open' ? (ms.label.includes('EARLY') ? 'Open, early close' : 'Market open') : ms.state === 'pre' ? 'Pre-market' : ms.state === 'post' ? 'After hours' : ms.label.includes('·') ? 'Closed, ' + ms.label.split('·')[1].trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Market closed';
-      setText($('t-state-text'), `${short} · ${ms.nextEvent === 'close' ? 'closes' : 'opens'} in ${fmtDuration(ms.msToNext)}`);
+      // a phone has room for about 24 characters here
+      const phone = app.layout === 'phone';
+      setText($('t-state-text'), phone
+        ? `${ms.state === 'open' ? 'Open' : ms.state === 'pre' ? 'Pre-market' : ms.state === 'post' ? 'After hours' : 'Closed'} · ${ms.nextEvent === 'close' ? 'closes' : 'opens'} ${fmtDuration(ms.msToNext)}`
+        : `${short} · ${ms.nextEvent === 'close' ? 'closes' : 'opens'} in ${fmtDuration(ms.msToNext)}`);
+      $('t-state').title = short;
       setClass($('t-state'), 'mstate ' + ms.state);
-      const [label, c] = st.mode === 'demo' ? ['Demo data', 'badge demo'] : bridge ? ['Live · TradingView', 'badge live'] : st.mode === 'live' ? ['Live', 'badge live'] : ['Delayed 15 min', 'badge'];
+      // a failed quote pull is retried within seconds; only say so if it keeps failing
+      if (st.mode !== 'demo' && st.cboe === 'err') errSince = errSince || Date.now(); else errSince = 0;
+      const stuck = errSince && Date.now() - errSince > 8000;
+      const [label, c] = st.mode === 'demo' ? ['Demo data', 'badge demo'] : stuck ? ['Reconnecting…', 'badge demo'] : bridge ? ['Live · TradingView', 'badge live'] : st.mode === 'live' ? ['Live', 'badge live'] : ['Delayed 15 min', 'badge'];
       const b = $('t-badge'); setText(b, label); setClass(b, c);
-      b.title = st.mode === 'demo' ? (st.note || 'Simulated prices') : bridge ? 'TradingView bridge, options from CBOE' : st.mode === 'live' ? `Finnhub ${st.finnhubWs === 'live' ? 'streaming' : st.finnhubWs}, plus CBOE` : `CBOE ${st.cboe === 'ok' ? 'connected' : st.cboe || 'connecting'}, about 15 minutes delayed`;
+      b.title = st.mode === 'demo' ? (st.note || 'Simulated prices')
+        : stuck ? `Can't reach market data right now (${navigator.onLine === false ? 'this device is offline' : 'weak connection'}). Retrying every few seconds; prices on screen may be stale.`
+        : bridge ? 'Live candles from your TradingView bridge. Options data from CBOE.'
+        : st.mode === 'live' ? `Real-time prices from Finnhub (${st.finnhubWs === 'live' ? 'streaming' : st.finnhubWs}). Options data from CBOE, about 15 minutes delayed.`
+        : 'Prices are from CBOE, about 15 minutes behind. For live prices, add a free Finnhub key in Settings, or connect the TradingView bridge.';
     },
   };
   $('t-badge').addEventListener('click', () => app.toast($('t-badge').title));
