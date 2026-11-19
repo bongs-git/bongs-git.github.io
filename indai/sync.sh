@@ -5,7 +5,7 @@
 #   ./sync.sh /path/to/jarvis-command-center
 #
 # Shared files are copied byte for byte. Never edit them here: change them in the source repo, then run this.
-# Website-only files (app.js, views.js, sheets.js, ideas.js, lock.js, push.js, chart.js, demo.js, hud.js, panels.js, css/, index.html, sw.js) are not touched.
+# Website-only files (app.js, views.js, sheets.js, ideas.js, retro.js, lock.js, push.js, chart.js, demo.js, hud.js, panels.js, css/, index.html, sw.js) are not touched.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="${1:-$HERE/../../jarvis-command-center}"

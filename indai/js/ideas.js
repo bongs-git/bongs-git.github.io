@@ -11,6 +11,9 @@ import { marketStatus } from './market.js';
 import { STRATEGIES } from './signals.js';
 import { fmtPrice, fmtMoney } from './hud.js';
 import { $, esc } from './views.js';
+import { relay } from './relay.js';
+import { etParts } from './market.js';
+import { retroHtml, retroQuestion, dayFacts, dayIsOver } from './retro.js';
 
 const timeET = (ms) => new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
 const age = (ms) => { const s = Math.max(0, Date.now() - ms) / 1000; return s < 50 ? 'now' : s < 3570 ? `${Math.max(1, Math.round(s / 60))}m` : timeET(ms).replace(/\s?([AP])M/, (m, a) => a.toLowerCase()); };
@@ -51,7 +54,8 @@ export function initIdeas(app) {
         return `<button type="button" class="${cls}" data-id="${esc(s.id)}" aria-label="${esc(label)}"><i class="arr"></i><b>${esc(s.sym)}</b><span class="sc">${s.score}</span><span class="tt">${esc(s.practice ? 'practice · ' + s.title : s.title)}</span>${mark ? `<span class="mk">${mark}</span>` : ''}<time>${s.forming ? timeET(s.confirmAt).replace(/\s?[AP]M/, '') : age(s.at)}</time></button>`;
       }).join('');
       // while alerts are off (breaker, or the goal is hit and the plan says stop) say so in front of the day's chips
-      const html = chips ? (scan === 'paused' ? `<span class="ideas-empty paused">${esc(text.split(':')[0])}</span>` : '') + chips : `<span class="ideas-empty">${esc(text)}</span>`;
+      const retroChip = dayOver() && (count || app.retro.banked(etParts().ymd)) ? '<button type="button" class="ichip retro" data-retro="open" aria-label="Open today\'s retrospective">Retrospective</button>' : '';
+      const html = chips ? retroChip + (scan === 'paused' ? `<span class="ideas-empty paused">${esc(text.split(':')[0])}</span>` : '') + chips : `<span class="ideas-empty">${esc(text)}</span>`;
       const key = html + '|' + scan + count;
       if (key === barKey) return; barKey = key;
       row.innerHTML = html;
@@ -59,7 +63,7 @@ export function initIdeas(app) {
       nEl.hidden = !count; nEl.textContent = count;
     },
   };
-  row.addEventListener('click', (e) => { const b = e.target.closest('.ichip'); if (b) app.openIdeas(b.dataset.id); });
+  row.addEventListener('click', (e) => { const b = e.target.closest('.ichip'); if (!b) return; if (b.dataset.retro) app.openRetro(); else app.openIdeas(b.dataset.id); });
   $('ideas-all').addEventListener('click', () => app.openIdeas());
 
   // ------------------------------------------------------------ the list
@@ -84,6 +88,7 @@ export function initIdeas(app) {
     return `<article class="idea open ${up ? 'up' : 'down'} ${s.forming ? 'forming' : ''}" data-id="${esc(s.id)}">${head}
       <div class="idea-body">
         <p class="when">${tag ? `<b>${esc(tag)}</b> · ` : ''}${esc(when)} · ${esc(grade(s))} ${esc(STRATEGIES[s.strat]?.short || s.strat)} setup${s.demo ? ' · demo data' : ''}</p>
+        ${s.learned ? `<p class="when learned">Scored ${s.raw.score} by the scanner, ${s.score} after what she has learned: ${esc(s.learned.map(l => `${l.label.replace(/\s*\(.*?\)$/, '')} ${l.pts > 0 ? '+' : '−'}${Math.abs(l.pts)}`).join(', '))}.</p>` : ''}
         ${k ? `<p class="mono k">${esc(contractLine(s))} <span>risk about ${fmtMoney(k.risk)}${k.overBudget ? ', over your per-trade risk' : ''}</span></p>` : ''}
         <div class="track ${o.state}" aria-hidden="true"><i class="zone-stop"></i><i class="zone-go"></i><i class="entry"></i><i class="now" style="left:${Math.max(1, Math.min(99, pos))}%"></i></div>
         <div class="track-lbl mono"><span class="down">stop ${fmtPrice(s.stop)}</span><span>entry ${fmtPrice(s.price)}</span><span class="up">target ${fmtPrice(s.target)}</span></div>
@@ -92,14 +97,45 @@ export function initIdeas(app) {
         <div class="pin-actions"><button type="button" class="btn primary" data-do="analyze">${s.forming ? 'Analyze now' : 'Analyze'}</button><button type="button" class="btn" data-do="chart">Show on chart</button></div>
       </div></article>`;
   }
+  // ------------------------------------------------------------ retrospective (the engine and the screen's content are in retro.js)
+  let rv = null, rvAt = 0, armed = '';
+  const dayOver = () => dayIsOver();
+  function renderRetro() {
+    if (!rv || (!(rv.today && rv.today.final) && Date.now() - rvAt > 90e3)) { rv = app.retro.review(); rvAt = Date.now(); }
+    const html = retroHtml(rv, armed);
+    if (html === listKey) return; listKey = html;
+    const top = body.scrollTop; body.innerHTML = html; body.scrollTop = top;
+  }
+  app.openRetro = () => { app.ideasView = 'retro'; rv = null; armed = ''; listKey = ''; holdUntil = 0; hideAlert(); body.scrollTop = 0; app.ui.openSheet('ideas'); };
+  app.retroTalk = async (r) => {
+    if (!r || !r.today || !r.today.recs.length) return;
+    const f = dayFacts(r.today.recs);
+    app.closeFocus(); if (app.layout === 'phone') app.ui.showTab('indai');
+    app.inputMode = 'typed';
+    ind.say('“Talk me through today’s retrospective.”', 'you', { speak: false });
+    ind.setThinking('Thinking…');
+    try {
+      const res = await relay.brain({ mode: 'talk', name: app.settings.name, question: retroQuestion(r), history: [], search: false,
+        context: { retrospective: { day: r.today.ymd, final: r.today.final, setups: f.all, missedMost: f.missed.map(g => ({ group: g.label, won: g.W, lost: g.L, R: g.R })), worked: f.worked.map(g => ({ group: g.label, won: g.W, lost: g.L, R: g.R })), stopOutsThatWentOnToTarget: f.stt, stopOuts: f.losses, nearMisses: f.near, pullbackEntry: f.pb, inForce: Object.values(r.tuning.labels || {}) } } }, app.settings.researchPass);
+      ind.setThinking(null);
+      const out = res.result || {};
+      if (out.spoken) ind.say(out.spoken, 'info');
+      for (const b of (out.summary || []).slice(0, 4)) ind.say('• ' + b, 'info', { speak: false });
+    } catch (e) { ind.setThinking(null); ind.say(e.code === 'not_configured' ? 'My thinking brain is not available for that right now. The numbers are all in the retrospective.' : `I couldn't think that through just now (${e.message}).`, 'info', { speak: false }); }
+  };
   V.ideas = {
     gap: 300, visible: () => app.focus === 'ideas',
     render() {
       if (Date.now() < holdUntil) { setTimeout(() => app.markDirty('ideas'), 720); return; }     // never rebuild under a finger
+      $('st-ideas').textContent = app.ideasView === 'retro' ? 'Retrospective' : 'Trade ideas';
+      if (app.ideasView === 'retro') { renderRetro(); return; }
       const list = all(), [, text] = scanState(), plan = app.activePlan();
       if (app.ideaOpen !== '' && !list.some(s => s.id === app.ideaOpen)) app.ideaOpen = list[0]?.id || null;      // '' = all closed on purpose
       const n = app.signals.filter(s => !s.practice).length;
-      const head = `<p class="note ideas-how">${n ? `${n} idea${n === 1 ? '' : 's'} today, newest first.` : esc(text) + '.'} Alerting on ${esc(plan.strategies.map(x => STRATEGIES[x].short).join(', '))} setups scoring ${plan.minScore}+, up to ${plan.perHour} alerts an hour.</p>`;
+      const tn = app.retro.tuning(), learnedN = Object.keys(tn.adj).length + (tn.minAdd ? 1 : 0) + (tn.stop !== 1 || tn.target !== 1 ? 1 : 0);
+      const over = dayOver();
+      const head = `<div class="retro-cta"><button type="button" class="btn ${over ? 'primary' : ''}" data-retro="open">Retrospective</button><span>${over ? 'The day is over. Go over how today’s ideas did and what to change.' : 'How today’s ideas have done so far. Best run after the close.'}</span></div>
+        <p class="note ideas-how">${n ? `${n} idea${n === 1 ? '' : 's'} today, newest first.` : esc(text) + '.'} Alerting on ${esc(plan.strategies.map(x => STRATEGIES[x].short).join(', '))} setups scoring ${plan.minScore + tn.minAdd}+, up to ${plan.perHour} alerts an hour${learnedN ? `, with ${learnedN} thing${learnedN === 1 ? '' : 's'} she has learned from retrospectives applied` : ''}.</p>`;
       const cards = list.map(s => card(s, s.id === app.ideaOpen)).join('');
       const foot = '<p class="fine">A setup confirms when its 5-minute candle closes. “Forming” is an early look at the candle that is still open, and it can disappear. Stop and target are for the stock price. This is information, not financial advice.</p>';
       const html = head + `<div class="idea-list">${cards || '<p class="idea-none">Nothing yet. The moment a setup confirms it shows here, in the strip at the top, and INDAI says it.</p>'}</div>` + foot;
@@ -110,6 +146,17 @@ export function initIdeas(app) {
     },
   };
   body.addEventListener('click', (e) => {
+    const rb = e.target.closest('[data-retro]');
+    if (rb) {
+      const act = rb.dataset.retro; holdUntil = 0; listKey = '';
+      if (act === 'open') { app.openRetro(); return; }
+      if (act === 'back') { app.ideasView = 'list'; body.scrollTop = 0; }
+      else if (act === 'apply' && rv) { app.retro.apply(rv.proposal); app.toast('Applied. She alerts with these from now on.'); rv = null; }
+      else if (act === 'keep') { app.toast('Nothing changed'); app.ideasView = 'list'; body.scrollTop = 0; }
+      else if (act === 'reset') { if (armed === 'reset') { app.retro.reset(); armed = ''; rv = null; app.toast('Cleared. She alerts as the scanner scores.'); } else { armed = 'reset'; setTimeout(() => { if (armed) { armed = ''; listKey = ''; app.markDirty('ideas'); } }, 5000); } }
+      else if (act === 'talk') { app.retroTalk(rv); return; }
+      V.ideas.render(); return;
+    }
     const t = e.target.closest('[data-toggle]');
     if (t) { app.ideaOpen = app.ideaOpen === t.dataset.toggle ? '' : t.dataset.toggle; holdUntil = 0; listKey = ''; V.ideas.render(); return; }
     const b = e.target.closest('[data-do]'); if (!b) return;
@@ -117,7 +164,7 @@ export function initIdeas(app) {
     if (b.dataset.do === 'chart') app.showIdeaOnChart(s); else app.analyzeIdea(s);
   });
   const openIdeas = app.openIdeas;
-  app.openIdeas = (id = null) => { if (id) { app.ideaOpen = id; app._ideaScroll = true; } listKey = ''; holdUntil = 0; hideAlert(); openIdeas(id); };
+  app.openIdeas = (id = null) => { app.ideasView = 'list'; if (id) { app.ideaOpen = id; app._ideaScroll = true; } listKey = ''; holdUntil = 0; hideAlert(); openIdeas(id); };
 
   // ------------------------------------------------------------ the card for a new idea
   const alertEl = $('idea-alert');

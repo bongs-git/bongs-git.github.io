@@ -12,6 +12,9 @@ same backend, same brain, same voice. Only the screens are different.
 - Ideas strip under the top bar on every screen: each setup alert the moment its candle confirms (and "forming" a minute or
   more before), newest first. Tap one for the reasons, the sized contract, stop, entry and target, what price did next, and
   one tap to rate it or see it on the chart. The day's ideas survive a reload, and ones you missed are caught up quietly.
+- Retrospective (button in Ideas, best after the close): how the day's setups did, where they missed most (time of day, kind
+  of setup, direction, ticker, entry, stop, target), and what INDAI would change. You apply the changes; she alerts with
+  them from then on, and each new day checks whether they held up.
 - Push notifications (Settings): A-plus setups reach the phone with INDAI closed, sent by the backend from the TradingView
   bridge candles. On iPhone, add INDAI to the Home Screen first.
 - Access lock: once the backend has an owner passcode, every device shows one screen asking for the access token and nothing

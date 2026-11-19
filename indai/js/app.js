@@ -17,6 +17,7 @@ import { initSheets } from './sheets.js';
 import { initIdeas } from './ideas.js';
 import { initLock } from './lock.js';
 import { initPush } from './push.js';
+import { initRetro } from './retro.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
@@ -91,6 +92,11 @@ const say = (...a) => app.indai.say(...a);
       const n = app.signals.filter(x => !x.practice).length;
       app.openIdeas();
       ind.say(n ? `${n} idea${n === 1 ? '' : 's'} so far today. Newest first.` : 'No setups have confirmed yet today. They show here the moment one does.', 'info');
+      return 'ok';
+    }
+    if (!ind.awaiting && /^(?:(?:show|open|run|do|start|give) )?(?:me )?(?:the |a |my |today s |todays )?(?:retrospective|retro|post mortem|day review|review of (?:the day|today))(?: (?:for )?today)?$/.test(plain)) {
+      app.openRetro();
+      ind.say('Here is the retrospective.', 'info');
       return 'ok';
     }
     return route(text);
@@ -730,8 +736,10 @@ function clearForming() { for (const sym of Object.keys(app.forming)) setForming
 function alertFloor(plan) {
   if (app.riskState().state !== 'armed') return null;
   if (app.day.plan && app.day.goalHit) { if (plan.afterGoal === 'stop') return null; if (plan.afterGoal === 'aplus') return Math.max(plan.minScore, 80); }
-  return plan.minScore;
+  return plan.minScore + (app.retro ? app.retro.tuning().minAdd : 0);      // plus what the retrospectives taught her
 }
+const tuned = (list, at) => (app.tune ? list.map(c => app.tune(c, at)) : list);
+app.completedBars = completedBars;
 // Candles that close while alerts are off count as seen, so they are not "caught up" later.
 function markSeen() { for (const sym of app.settings.symbols) { const b = completedBars(sym); if (!b.length) continue; const t = b[b.length - 1].t; sigMem.lastBar[sym] = t; sawCandle(sym + t); } }
 function scanTick() {
@@ -757,7 +765,7 @@ function scanTick() {
       setForming(sym, null);                                   // that candle has closed: it confirms now or not at all
       if (now - (lastT + 300e3) > (liveData ? 6 * 60e3 : 25 * 60e3)) continue; // stale bar
       sawCandle(sym + lastT);
-      const cands = scanSetups(sym, bars, { levels: lv, leadDir, now, enabled: plan.strategies })
+      const cands = tuned(scanSetups(sym, bars, { levels: lv, leadDir, now, enabled: plan.strategies }), now)
         .filter(c => c.score >= minScore).sort((a, b) => b.score - a.score);
       const sig = cands.find(c => now - (sigMem.last[sym + c.strat + c.dir] || 0) > 20 * 60e3);
       if (!sig) continue;
@@ -785,7 +793,7 @@ function lookAhead(sym, done, { lv, leadDir, plan, minScore, now, liveData }) {
   sigMem.lastOne[sym] = latest; sigMem.lastOneAt[sym] = now;
   const mins = open ? Math.round((latest - open.t) / 60e3) : 0;
   if (!open || open.t !== lastDone.t + 300e3 || mins < 2 || mins > 4 || now - latest > (liveData ? 150e3 : 25 * 60e3)) { setForming(sym, null); return; }
-  const c = scanSetups(sym, [...done, { ...open, v: Math.round((open.v || 0) * 5 / mins) }], { levels: lv, leadDir, now, enabled: plan.strategies })
+  const c = tuned(scanSetups(sym, [...done, { ...open, v: Math.round((open.v || 0) * 5 / mins) }], { levels: lv, leadDir, now, enabled: plan.strategies }), now)
     .filter(x => x.score >= minScore && now - (sigMem.last[sym + x.strat + x.dir] || 0) > 20 * 60e3).sort((a, b) => b.score - a.score)[0];
   if (!c) { setForming(sym, null); return; }
   c.forming = true; c.confirmAt = open.t + 300e3; c.id = 'forming|' + ideaId(c); c.contract = contractFor(c, plan);
@@ -835,7 +843,7 @@ function catchUp() {
       const sub = bars.slice(0, i), barT = sub[i - 1].t, at = barT + 300e3;
       if (sigMem.scanned.has(sym + barT)) continue;                      // looked at already, live or in an earlier catch-up
       sawCandle(sym + barT);
-      const c = scanSetups(sym, sub, { levels: lv, leadDir: 0, now: at, enabled: plan.strategies })
+      const c = tuned(scanSetups(sym, sub, { levels: lv, leadDir: 0, now: at, enabled: plan.strategies }), at)
         .filter(x => x.score >= floor && at - (last[x.strat + x.dir] || 0) > 20 * 60e3).sort((a, b) => b.score - a.score)[0];
       if (!c) continue;
       last[c.strat + c.dir] = at; found.push({ ...c, at });
@@ -1186,6 +1194,7 @@ async function boot() {
   if (qp.get('nocheckin') === '1') app.noAutoCheckIn = true;
   app.ui = initViews(app);
   initSheets(app);
+  initRetro(app);
   initIdeas(app);
   initPush(app);
   // Behind the access lock nothing starts: no prices, no alerts, no voice. Unlocking reloads the page.
