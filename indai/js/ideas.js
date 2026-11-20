@@ -91,6 +91,7 @@ export function initIdeas(app) {
         ${s.learned ? `<p class="when learned">Scored ${s.raw.score} by the scanner, ${s.score} after what she has learned: ${esc(s.learned.map(l => `${l.label.replace(/\s*\(.*?\)$/, '')} ${l.pts > 0 ? '+' : '−'}${Math.abs(l.pts)}`).join(', '))}.</p>` : ''}
         ${app.marketData.optionNote(s.sym) ? `<p class="note warn">${esc(app.marketData.optionNote(s.sym))} Contract values below are estimates.</p>` : ''}
         ${k ? `<p class="mono k">${esc(contractLine(s))} <span>risk about ${fmtMoney(k.risk)}${k.overBudget ? ', over your per-trade risk' : ''}</span></p>` : ''}
+        ${k && !s.demo && app.settings.researchPass ? `<p class="k"><a href="./trade.html?u=${encodeURIComponent(s.sym)}&e=${encodeURIComponent(k.expiry)}&t=${s.type === 'P' ? 'P' : 'C'}&k=${encodeURIComponent(k.strike)}&q=${encodeURIComponent(k.qty)}" style="color:inherit;text-decoration:underline">Open this contract in Trade</a></p>` : ''}
         <div class="track ${o.state}" aria-hidden="true"><i class="zone-stop"></i><i class="zone-go"></i><i class="entry"></i><i class="now" style="left:${Math.max(1, Math.min(99, pos))}%"></i></div>
         <div class="track-lbl mono"><span class="down">stop ${fmtPrice(s.stop)}</span><span>entry ${fmtPrice(s.price)}</span><span class="up">target ${fmtPrice(s.target)}</span></div>
         <p class="nowl">${nowLine}</p>

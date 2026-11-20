@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050709">
+<meta name="robots" content="noindex">
+<title>Trade · INDAI</title>
+<link rel="icon" href="./icons/icon-192.png">
+<style>
+  :root { --ink:#050709; --panel:#0a0e14; --raised:#111721; --line:rgba(255,255,255,.12); --text:#f3f1ea; --dim:#9aa3b2; --gold:#dcbf6e; --gold-ink:#17120a; --up:#3ecf8e; --down:#f2706b; }
+  * { box-sizing: border-box; }
+  html { background: var(--ink); color-scheme: dark; -webkit-text-size-adjust: 100%; }
+  body { margin: 0; min-height: 100dvh; background: var(--ink); color: var(--text); font: 400 16px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; padding: max(16px, env(safe-area-inset-top)) 16px 48px; }
+  main { max-width: 600px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  p { margin: 0 0 10px; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .dim { color: var(--dim); } .ok { color: var(--up); } .bad { color: var(--down); }
+  .num { font-variant-numeric: tabular-nums; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 14px 0; }
+  button, a.btn { min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; font-weight: 600; text-align: center; text-decoration: none; padding: 10px 14px; cursor: pointer; touch-action: manipulation; }
+  button.gold { background: var(--gold); color: var(--gold-ink); border-color: transparent; }
+  button.red { background: var(--down); color: var(--gold-ink); border-color: transparent; }
+  button.wide { display: block; width: 100%; }
+  button:disabled { opacity: .45; pointer-events: none; }
+  button.chip { min-height: 44px; min-width: 56px; padding: 6px 12px; font-weight: 500; }
+  button.chip.on { border-color: var(--gold); color: var(--gold); }
+  button.quiet { background: none; border: 0; color: var(--dim); font-weight: 400; text-decoration: underline; min-height: 44px; padding: 8px 0; }
+  input { width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: inherit; padding: 10px 12px; }
+  label { display: block; font-size: 13px; color: var(--dim); margin-bottom: 4px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > .grow { flex: 1 1 0; min-width: 0; }
+  .stepper { display: grid; grid-template-columns: 48px 1fr 48px; gap: 6px; }
+  .stepper input { text-align: center; }
+  canvas.px { display: block; width: 100%; height: 190px; touch-action: none; border-radius: 10px; background: var(--ink); border: 1px solid var(--line); margin: 10px 0; cursor: ns-resize; }
+  .bar { background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 8px 0; }
+  .order { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
+  .order:first-of-type { border-top: 0; }
+  details summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--dim); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><h1>Trade</h1><button id="acct" class="chip" hidden></button></div>
+  <p class="dim">Orders go to your Schwab account only when you tap. INDAI never sends one by herself.</p>
+  <p id="note" role="status"></p>
+
+  <div class="card" id="passcard" hidden>
+    <label for="pass">Your INDAI passcode</label>
+    <input id="pass" type="password" autocomplete="current-password" placeholder="Passcode" style="margin-bottom:10px">
+    <button id="passgo" class="gold wide">Continue</button>
+  </div>
+  <div class="card" id="pickacct" hidden><h2>Which account?</h2><div class="row" id="accts"></div></div>
+  <div class="card" id="devcard" hidden>
+    <h2>This device cannot send orders yet</h2>
+    <p class="dim">You can look, but sending needs your approval from a device that is already approved: open Trade there, tap Devices and approve code <b id="devcode" class="num"></b>.</p>
+    <button id="devretry" class="wide">I approved it</button>
+  </div>
+
+  <div id="app" hidden>
+    <div class="card" id="ticket">
+      <h2>Buy an option</h2>
+      <div class="grid">
+        <div><label for="t-u">Ticker</label><input id="t-u" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="SPY"></div>
+        <div><label for="t-e">Expiry</label><input id="t-e" type="date"></div>
+        <div><label>Type</label><div class="row"><button class="chip grow" id="t-c">Call</button><button class="chip grow" id="t-p">Put</button></div></div>
+        <div><label for="t-k">Strike</label><input id="t-k" inputmode="decimal" placeholder="695"></div>
+      </div>
+      <div class="row" id="t-roots" hidden></div>
+      <p id="t-quote" class="dim num" role="status">Fill in the contract to see its price.</p>
+      <div id="t-order" hidden>
+        <div class="grid">
+          <div><label for="t-q">Contracts</label><div class="stepper"><button id="t-less" aria-label="One fewer">−</button><input id="t-q" inputmode="numeric" value="1"><button id="t-more" aria-label="One more">+</button></div></div>
+          <div><label for="t-l">Limit price</label><input id="t-l" inputmode="decimal"></div>
+        </div>
+        <div class="row" style="margin-bottom:10px"><button class="chip grow" id="t-bid">Bid</button><button class="chip grow" id="t-mid">Mid</button><button class="chip grow on" id="t-ask">Ask</button></div>
+        <div class="grid">
+          <div><label for="t-s">Stop (sells if the option falls to)</label><input id="t-s" inputmode="decimal"></div>
+          <div><label>&nbsp;</label><button class="chip wide" id="t-auto" style="width:100%">20% below</button></div>
+        </div>
+        <p id="t-sum" class="num"></p>
+        <p id="t-check" class="dim" role="status"></p>
+        <button id="t-buy" class="gold wide" disabled>Buy</button>
+      </div>
+      <p id="t-out" role="status" style="margin:10px 0 0"></p>
+    </div>
+
+    <div id="positions"></div>
+    <div class="card"><h2>Orders today</h2><div id="orders"><p class="dim">Loading…</p></div></div>
+    <div class="card"><details id="devs"><summary>Devices that may send orders</summary><div id="devlist"></div></details></div>
+  </div>
+  <p><a class="dim" href="./">Back to INDAI</a> · <a class="dim" href="./schwab.html">Schwab connection</a></p>
+</main>
+<script type="module" src="./js/trade.js"></script>
+</body>
+</html>
