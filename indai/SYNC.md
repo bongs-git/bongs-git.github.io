@@ -94,7 +94,8 @@ long-press magnifier and earlier-session time labels. History loading/end messag
 TradingView uses its vendor-hosted Advanced Chart inside a credentialless, cross-origin sandboxed iframe;
 third-party code never executes in the app's origin. The new Web Component was tested in an opaque srcdoc
 frame but failed on cookie access, so it is not shipped. The hosted embed can use its own origin's storage. Full screen has a CSS fallback and an external chart link.
-Actual third-party rendering and iPhone silent-ring speech/closed-app push remain device release checks.
+The vendor-hosted chart rendered with candles and controls in the desktop preview. Actual iPhone/iPad
+rendering and iPhone silent-ring speech/closed-app push remain device release checks.
 
 `profile-sync.js` serializes local changes and retains pending work across visits. Drawing profiles use
 `{version:1, items:{[id]:drawingOrTombstone}}` with per-item `symbol` and `updatedAt` milliseconds.

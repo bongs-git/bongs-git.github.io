@@ -271,7 +271,7 @@ export function initViews(app) {
     frame.src = tvOn ? 'https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=en#' + encodeURIComponent(JSON.stringify({
       symbol: s.main, interval: TV_IV[s.interval] || '5', timezone: 'America/New_York', theme: 'dark', style: '1',
       allow_symbol_change: true, hide_side_toolbar: false, withdateranges: true, save_image: false,
-      width: '100%', height: '100%', support_host: 'https://www.tradingview.com',
+      autosize: true, width: '100%', height: '100%', support_host: 'https://www.tradingview.com',
     })) : 'about:blank';
 
   };

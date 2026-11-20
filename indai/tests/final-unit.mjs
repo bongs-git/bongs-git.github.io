@@ -48,4 +48,11 @@ assert.equal(app.marketData.changeKnown('QQQ'), false);
 await assert.rejects(relay.chain('QQQ'));
 assert.match(app.marketData.optionNote('QQQ'), /Option prices are unavailable right now.*refusing/);
 console.log('PASS bridge freshness, missing previous close and provider failure explanations');
+
+const localAdded = draw.addDrawing('TSLA', {type:'ray',a});
+draw.mergeDrawings({version:1,items:{remote: {id:'remote',symbol:'TSLA',type:'ray',a,updatedAt:now+50}}});
+draw.undoDrawing('TSLA');
+assert(!draw.drawingsFor('TSLA').some(d => d.id === localAdded.id));
+assert(draw.drawingsFor('TSLA').some(d => d.id === 'remote'));
+console.log('PASS undo preserves an unrelated drawing merged from another device');
 console.log('ALL PASSED');

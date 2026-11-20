@@ -5,9 +5,10 @@ const DELETED = KEY + '.deleted';
 const KEEP = 31 * 864e5;
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const validSymbol = (sym) => /^[A-Z.]{1,8}$/.test(sym);
+const validId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(id) && !['__proto__', 'constructor', 'prototype'].includes(id);
 const point = (p) => p && Number.isFinite(p.t) && Number.isFinite(p.p);
 function valid(d) {
-  if (!d || typeof d.id !== 'string' || d.id.length > 100) return false;
+  if (!d || !validId(d.id)) return false;
   if (d.type === 'level') return Number.isFinite(d.p);
   if (d.type === 'ray') return point(d.a);
   return ['line', 'rect'].includes(d.type) && point(d.a) && point(d.b) && Number.isFinite(d.day) && Date.now() - d.day < KEEP;
@@ -40,7 +41,7 @@ export function finishDrawingEdit(sym, commit = true) {
   const after = drawingsFor(sym);
   if (JSON.stringify(before) === JSON.stringify(after)) return;
   const history = undo.get(sym) || [];
-  history.push(before); undo.set(sym, history.slice(-40));
+  history.push({ before, after: copy(after) }); undo.set(sym, history.slice(-40));
   stampChanges(sym, before, after);
   persist(); notify();
 }
@@ -73,8 +74,12 @@ export function removeDrawing(sym, id) {
 export function clearDrawings(sym) { change(sym, () => { delete state[sym]; }); }
 export function canUndoDrawing(sym) { return !!undo.get(sym)?.length; }
 export function undoDrawing(sym) {
-  const previous = undo.get(sym)?.pop();
-  if (!previous) return false;
+  const operation = undo.get(sym)?.pop();
+  if (!operation) return false;
+  const ids = new Set([...operation.before, ...operation.after].map(d => d.id));
+  const changed = new Set([...ids].filter(id => JSON.stringify(operation.before.find(d => d.id === id)) !== JSON.stringify(operation.after.find(d => d.id === id))));
+  // Undo only this operation; another device may have added an unrelated drawing since then.
+  const previous = [...drawingsFor(sym).filter(d => !changed.has(d.id)), ...copy(operation.before.filter(d => changed.has(d.id)))];
   stampChanges(sym, drawingsFor(sym), previous);
   state[sym] = previous;
   persist(); notify();
@@ -94,7 +99,7 @@ export function mergeDrawings(value) {
   if (value?.version !== 1 || !value.items || typeof value.items !== 'object' || edits.size) return;
   const local = drawingProfile().items;
   for (const [id, incoming] of Object.entries(value.items)) {
-    if (incoming?.id !== id || !validSymbol(incoming.symbol) || !Number.isFinite(incoming.updatedAt) || incoming.updatedAt < 0) continue;
+    if (!validId(id) || incoming?.id !== id || !validSymbol(incoming.symbol) || !Number.isFinite(incoming.updatedAt) || incoming.updatedAt < 0) continue;
     if (!incoming.deleted && !valid(incoming)) continue;
     const current = local[id];
     // A deterministic tie-break preserves a deletion when two devices use the same millisecond.
