@@ -396,7 +396,8 @@ export class PriceChart {
     this.geo = null;
     const axisW = W < 420 ? 50 : 58;
     const plot = { x: 4, y: 8, w: W - axisW - 6, h: H - 30 };
-    if (bars.length < (long ? 1 : 2)) {
+    // One candle is enough to draw: right after the open a 1h or 4h chart has a single candle for an hour or more.
+    if (!bars.length) {
       if (long && app.tf) app.tf.want(sym, iv);
       txt(ctx, long ? 'Loading daily candles…' : 'Loading market data…', W / 2, H / 2 - 6, { size: 14, color: C.dim, align: 'center' });
       if (app.feed.status.note) txt(ctx, app.feed.status.note, W / 2, H / 2 + 16, { size: 11.5, color: C.faint, align: 'center' });

@@ -27,7 +27,7 @@ const box = (p) => p.evaluate(() => { const r = document.getElementById('chart-h
       await p.click(`#ch-tf [data-iv="${tf}"]`); await sleep(tf === '1D' ? 1200 : 600);
       seen[tf] = await geo(p);
     }
-    check(`[${label}] all eight candle sizes draw`, Object.entries(seen).every(([tf, g]) => g && g.tf === tf && g.pts > 2), Object.fromEntries(Object.entries(seen).map(([k, g]) => [k, g && g.pts])));
+    check(`[${label}] all eight candle sizes draw`, Object.entries(seen).every(([tf, g]) => g && g.tf === tf && g.pts >= 1), Object.fromEntries(Object.entries(seen).map(([k, g]) => [k, g && g.pts])));
     check(`[${label}] 30m, 1h and 4h open with earlier sessions in view`, ['30min', '1h', '4h'].every(tf => seen[tf].first < 0 && seen[tf].H > 0));
     check(`[${label}] daily and weekly show years of candles`, seen['1D'].H > 500 && seen['1W'].H > 100 && seen['1D'].long, { daily: seen['1D'].H, weekly: seen['1W'].H });
     const pressed = await p.evaluate(() => document.querySelector('#ch-tf [data-iv="1W"]').classList.contains('on'));
@@ -116,12 +116,14 @@ const box = (p) => p.evaluate(() => { const r = document.getElementById('chart-h
   // ---- INDAI's part: the conversation brain today; the picture and the atlas once the server offers them
   for (const modes of [[], ['capture', 'atlas']]) {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 860 } }), p = await ctx.newPage(), errs = [], asked = [];
+    let emptyOnce = !modes.length; // the server's first answer comes back empty (cut off at its length limit)
     p.on('pageerror', e => errs.push(String(e)));
     await installBackend(p, lastSession(), (req, json) => {
       if (req.method() === 'GET') return json({ configured: true, passcode: false, brains: { claude: true }, ...(modes.length ? { modes } : {}) });
-      const body = JSON.parse(req.postData() || '{}'); asked.push({ mode: body.mode, search: body.search, session: body.session, image: !!body.image, patterns: (body.patterns || []).length, capture: !!(body.capture || (body.context && body.context.capture)) });
+      const body = JSON.parse(req.postData() || '{}'); asked.push({ mode: body.mode, search: body.search, session: body.session, image: !!body.image, patterns: (body.patterns || []).length, capture: !!(body.capture || (body.context && body.context.capture)), size: JSON.stringify(body.context || {}).length });
       if (body.mode === 'atlas') return json({ reads: (body.patterns || []).map(x => ({ code: x.code, at: x.at, light: 'AMBER', win: 0.553, base: 0.534, n: 5547, cellKey: 'below/high/5', line: 'a lean, not an edge' })) });
       if (body.mode === 'capture') return json({ result: { spoken: 'From the picture: buyers defended the low twice.', summary: ['Bull path above the box high.'] } });
+      if (body.mode === 'talk' && emptyOnce && !(emptyOnce = false)) return json({ result: { spoken: '' }, remembered: [] });
       if (body.mode === 'talk') return json({ result: { spoken: 'Sideways with a slight upward tilt; watch the box high.', summary: ['Box high is the trigger.'] }, remembered: [] });
       return json({ error: 'bad_mode', message: 'unexpected' }, 400);
     });
@@ -129,10 +131,18 @@ const box = (p) => p.evaluate(() => { const r = document.getElementById('chart-h
     await p.evaluate(() => window.__indai.app.setTimeframe('5min')); await sleep(800);
     await p.evaluate(() => window.__indai.app.chart.analyzeView());
     await p.waitForFunction(() => { const c = window.__indai.app.capture.current(); return c && c.status.read !== 'working' && c.status.atlas !== 'working'; }, null, { timeout: 15000 }).catch(() => {});
+    if (!modes.length) {
+      const first = await p.evaluate(() => ({ status: window.__indai.app.capture.current().status.read, text: document.getElementById('sb-capture').innerText, retry: !!document.getElementById('cap-retry') }));
+      check('[server today] an empty answer says so and offers Try again', first.status === 'failed' && /cut off before it finished/.test(first.text) && first.retry, { status: first.status, retry: first.retry, text: first.text.slice(-300) });
+      await p.click('#cap-retry');
+      await p.waitForFunction(() => window.__indai.app.capture.current().status.read === 'done', null, { timeout: 10000 }).catch(() => {});
+      const talk = asked.filter(a => a.mode === 'talk');
+      check('[server today] the brief sent to the conversation brain stays small', talk.every(a => a.size < 6000), talk.map(a => a.size));
+    }
     const c = await p.evaluate(() => { const c = window.__indai.app.capture.current(); return { status: c.status, read: c.read, notable: c.r && c.r.notable.length, atlas: (c.atlas || []).length, text: document.getElementById('sb-capture').innerText }; });
     const label = modes.length ? '[server with capture and atlas]' : '[server today]';
     if (!modes.length) {
-      check(`${label} the read comes from the conversation brain, without web search and in its own session`, c.status.read === 'done' && /upward tilt/.test(c.text) && asked.some(a => a.mode === 'talk' && a.search === false && a.session === 'capture' && a.capture), asked);
+      check(`${label} the read comes from the conversation brain, without web search and in its own session`, c.status.read === 'done' && /upward tilt/.test(c.text) && asked.some(a => a.mode === 'talk' && a.search === false && /^capture-\d+$/.test(a.session) && a.capture), asked);
       check(`${label} nothing is sent in a mode the server does not list`, !asked.some(a => a.mode === 'capture' || a.mode === 'atlas'), asked);
       check(`${label} the atlas odds are promised for later, not made up`, c.notable === 0 || /once INDAI's atlas service is switched on/.test(c.text));
     } else {
