@@ -273,6 +273,14 @@ body[data-tab="watch"] .view[data-view="watch"], body[data-tab="chart"] .view[da
 .drawbar { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .draw-hint { flex: 1 1 180px; min-width: 0; font-size: 12.5px; line-height: 1.35; color: var(--dim); }
 .chart-reset { position: absolute; top: 6px; right: 64px; background: rgba(5,7,9,.86); }
+/* the price axis and the time axis are handles: dragging them stretches or squeezes that scale */
+.axis-y { position: absolute; top: 0; right: 0; bottom: 30px; width: 56px; touch-action: none; cursor: ns-resize; }
+.axis-x { position: absolute; left: 0; right: 56px; bottom: 0; height: 28px; touch-action: none; cursor: ew-resize; }
+/* TradingView's chart in place of INDAI's */
+.tv-wrap { position: absolute; inset: 0; background: var(--ink, #050709); }
+.tv-wrap iframe { width: 100%; height: 100%; border: 0; display: block; }
+.tv-out { position: absolute; right: 8px; bottom: 8px; background: rgba(5,7,9,.9); font-size: 12px; min-height: 30px; }
+.chart-host.tv { cursor: default; touch-action: auto; height: clamp(380px, calc(100dvh - 300px), 760px); }
 @media (max-width: 640px) {
   #ch-draw { width: 40px; padding: 0; justify-content: center; } #ch-draw span { display: none; }
 }

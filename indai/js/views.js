@@ -213,7 +213,7 @@ export function initViews(app) {
       const note = $('ch-note'), mode = app.feed.status.mode;
       setText(note, mode === 'demo' ? 'Demo data, not real prices' : mode === 'delayed' && !app.feed.bridgeLive ? 'Delayed about 15 min' : '');
       setClass(note, 'chart-note' + (mode === 'demo' ? '' : ' quiet'));
-      chart.draw();
+      if (tvOn) syncTv(); else chart.draw();
     },
   };
   $('ch-prev').addEventListener('click', () => app.cycleSymbol(-1));
@@ -246,7 +246,25 @@ export function initViews(app) {
     else if (e.key === 'Escape') chart.setDrawing(false);
   });
   $('ch-deep').addEventListener('click', () => app.openDeepDive());
-  $('ch-tv').addEventListener('click', () => app.openTradingView());
+  // TradingView's own chart, embedded in the panel in place of INDAI's (their free chart widget: full history, their
+  // drawing tools and indicators, but not signed in to the trader's account). It lives in a frame from their site.
+  let tvOn = false, tvKey = '';
+  const TV_IV = { '1min': '1', '5min': '5', '15min': '15' };
+  const syncTv = () => {
+    const s = app.settings, host = $('chart-host'), frame = $('tv-frame'), key = tvOn ? s.main + '|' + s.interval : '';
+    host.classList.toggle('tv', tvOn);
+    $('tv-wrap').hidden = !tvOn;
+    $('ch-tv').classList.toggle('on', tvOn); $('ch-tv').setAttribute('aria-pressed', tvOn);
+    setText($('ch-tv-label'), tvOn ? 'INDAI chart' : 'TradingView chart');
+    $('ch-draw').disabled = tvOn;
+    $('tv-out').href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.main)}`;
+    if (key === tvKey) return;
+    tvKey = key;
+    frame.src = tvOn ? 'https://s.tradingview.com/widgetembed/?' + new URLSearchParams({ frameElementId: 'tv-frame', symbol: s.main, interval: TV_IV[s.interval] || '5',
+      hidesidetoolbar: '0', symboledit: '1', saveimage: '0', toolbarbg: '0a0e14', studies: '[]', theme: 'dark', style: '1', timezone: 'America/New_York', withdateranges: '1', hideideas: '1', locale: 'en' }) : 'about:blank';
+  };
+  app.showTradingView = (on) => { tvOn = on == null ? !tvOn : !!on; if (tvOn) chart.setDrawing(false); syncTv(); app.markDirty('chart'); };
+  $('ch-tv').addEventListener('click', () => app.showTradingView());
 
   // ------------------------------------------------------------ GEX levels
   V.levels = {

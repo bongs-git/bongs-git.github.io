@@ -108,13 +108,18 @@
         </div>
         <div class="chart-actions">
           <button type="button" class="btn mini" id="ch-deep"><svg><use href="#ic-dive"/></svg><span>Deep dive</span></button>
-          <button type="button" class="btn mini" id="ch-tv"><svg><use href="#ic-out"/></svg><span>Open in TradingView</span></button>
+          <button type="button" class="btn mini" id="ch-tv" aria-pressed="false"><svg><use href="#ic-candles"/></svg><span id="ch-tv-label">TradingView chart</span></button>
         </div>
       </header>
       <div class="chart-host" id="chart-host">
         <canvas class="base"></canvas><canvas class="over"></canvas>
         <span class="chart-note" id="ch-note"></span>
+        <div class="axis-y" aria-hidden="true"></div><div class="axis-x" aria-hidden="true"></div>
         <button type="button" class="btn mini chart-reset" id="ch-reset" hidden>Reset view</button>
+        <div class="tv-wrap" id="tv-wrap" hidden>
+          <iframe id="tv-frame" title="TradingView chart" credentialless allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+          <a class="btn mini tv-out" id="tv-out" target="_blank" rel="noopener">Full TradingView in a new tab</a>
+        </div>
       </div>
     </article>
     <article class="panel" id="p-levels" aria-labelledby="h-lv">

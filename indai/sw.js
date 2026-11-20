@@ -1,7 +1,7 @@
 // INDAI website service worker: offline shell + always-fresh app files.
 // Market data, the backend and the voice models' downloads go straight to the network
 // (the models are kept by the browser's own model cache after the first download).
-const CACHE = 'indai-web-v5';
+const CACHE = 'indai-web-v6';
 // The on-device voice runtime (about 24 MB) is kept in its own cache so it is downloaded once and works offline.
 // sync.sh changes this name whenever those files change, which makes browsers fetch the new ones.
 const VOICE = 'indai-web-voice-17629cb';

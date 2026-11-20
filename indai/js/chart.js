@@ -48,6 +48,8 @@ export class PriceChart {
     this.geo = null; this.hover = null;
     // Moving and zooming: null follows the session by itself, otherwise the stretch of candles the trader chose.
     this.view = null; this.viewKey = '';
+    // The price scale: null fits the candles on screen, otherwise the range the trader set by dragging the price axis.
+    this.ys = null;
     // Drawing: whether the drawing bar is open, the tool in hand, the selected drawing, the gesture in progress,
     // and the first point of a line that is being placed with two taps.
     this.drawing = false; this.tool = 'move'; this.sel = null; this.drag = null; this.pending = null;
@@ -61,7 +63,7 @@ export class PriceChart {
     const host = this.host;
     const pos = (ev) => { const r = host.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
     host.addEventListener('pointerdown', (ev) => {
-      if ((ev.pointerType === 'mouse' && ev.button !== 0) || ev.target.closest('button')) return;
+      if ((ev.pointerType === 'mouse' && ev.button !== 0) || ev.target.closest('button, a, .tv-wrap')) return;
       const p = pos(ev);
       clearTimeout(this.hoverTimer);
       this.ptrs.set(ev.pointerId, p);
@@ -103,8 +105,14 @@ export class PriceChart {
       const g = this.geo;
       if (!g) return;
       const x = ev.clientX - host.getBoundingClientRect().left;
-      if (x < g.plot.x || x > g.plot.x + g.plot.w) return;
       const unit = ev.deltaMode === 1 ? 33 : 1, dx = ev.deltaX * unit, dy = ev.deltaY * unit;
+      if (x > g.plot.x + g.plot.w) { // over the price axis: stretch or squeeze the price scale
+        ev.preventDefault();
+        const k = Math.exp(Math.max(-300, Math.min(300, dy)) * 0.0015), mid = (g.lo + g.hi) / 2, half = (g.hi - g.lo) / 2 * k;
+        this.setY(mid - half, mid + half);
+        return;
+      }
+      if (x < g.plot.x) return;
       const pinch = ev.ctrlKey || ev.metaKey, fixed = document.documentElement.scrollHeight <= window.innerHeight + 1;
       if (!pinch && Math.abs(dx) > Math.abs(dy)) { ev.preventDefault(); this.setView(g.first + dx / g.cw, g.slots); return; }
       if (!pinch && !fixed) return;
@@ -116,14 +124,21 @@ export class PriceChart {
   }
   ui() { if (this.onUi) this.onUi(); }
   // Dragging a drawing up or down must not scroll the page, so the browser's own touch panning is off while drawing.
-  syncTouch() { this.host.style.touchAction = this.drawing || this.sel || this.tool !== 'move' ? 'none' : ''; }
+  syncTouch() { this.host.style.touchAction = this.drawing || this.sel || this.ys || this.tool !== 'move' ? 'none' : ''; }
   clampSlots(n) { const g = this.geo; return Math.max(MIN_SLOTS, Math.min(Math.max(g ? g.full : 390, 30), n)); }
   redraw() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.draw(); }); }
   setView(first, slots) { const was = !!this.view; this.view = { first, slots }; this.redraw(); if (!was) this.ui(); }
-  resetView() { if (!this.view) return; this.view = null; this.redraw(); this.ui(); }
+  // The price range, kept between a sliver of and many times the range that fits the candles.
+  setY(lo, hi) {
+    const g = this.geo, fit = g ? g.autoHi - g.autoLo : hi - lo, was = !!this.ys;
+    const span = Math.max(fit * 0.03, Math.min(fit * 40, hi - lo)), mid = (lo + hi) / 2;
+    this.ys = { lo: mid - span / 2, hi: mid + span / 2 };
+    this.syncTouch(); this.redraw(); if (!was) this.ui();
+  }
+  resetView() { if (!this.view && !this.ys) return; this.view = null; this.ys = null; this.syncTouch(); this.redraw(); this.ui(); }
   state() {
     const g = this.geo;
-    return { drawing: this.drawing, tool: this.tool, selected: !!this.sel, pending: !!this.pending, manual: !!this.view,
+    return { drawing: this.drawing, tool: this.tool, selected: !!this.sel, pending: !!this.pending, manual: !!(this.view || this.ys),
       count: g ? drawingsFor(this.app.settings.main, g.open).length : 0 };
   }
   setDrawing(on) {
@@ -171,6 +186,10 @@ export class PriceChart {
   down(p, coarse) {
     const g = this.geo;
     this.drag = null;
+    // Dragging the price axis stretches or squeezes the prices; dragging the time axis does the same to the candles.
+    const right = g.plot.x + g.plot.w, bottom = g.plot.y + g.plot.h;
+    if (p.x > right && p.y <= bottom + 6) { this.drag = { kind: 'yscale', start: p, lo0: g.lo, hi0: g.hi, moved: false }; return; }
+    if (p.y > bottom && p.x >= g.plot.x && p.x <= right) { this.drag = { kind: 'xscale', start: p, first0: g.first, slots0: g.slots, moved: false }; return; }
     if (!inPlot(g, p)) return;
     const at = { t: tOf(g, p.x), p: pOf(g, p.y) }, sym = this.app.settings.main;
     if (this.tool === 'line') {
@@ -183,7 +202,7 @@ export class PriceChart {
       const hit = this.hit(p, coarse);
       // A drawing is first tapped to select it; once selected, dragging moves it. Anything else moves the chart.
       if (hit && hit.d.id === this.sel) this.drag = { kind: hit.part, d: hit.d, start: p, from: at, a0: hit.d.a && { ...hit.d.a }, b0: hit.d.b && { ...hit.d.b }, moved: false };
-      else this.drag = { kind: 'pan', start: p, first0: g.first, slots0: g.slots, cw0: g.cw, hit, moved: false };
+      else this.drag = { kind: 'pan', start: p, first0: g.first, slots0: g.slots, cw0: g.cw, lo0: g.lo, hi0: g.hi, hit, moved: false };
     }
     this.drawOver();
   }
@@ -192,9 +211,21 @@ export class PriceChart {
     if (!g || !d) return;
     if (!d.moved && Math.hypot(p.x - d.start.x, p.y - d.start.y) > 5) d.moved = true;
     const at = { t: tOf(g, p.x), p: pOf(g, p.y) };
+    if (d.kind === 'yscale') { // down squeezes the prices together, up stretches them
+      if (d.moved) { const k = Math.exp((p.y - d.start.y) * 0.006), mid = (d.lo0 + d.hi0) / 2, half = (d.hi0 - d.lo0) / 2 * k; this.setY(mid - half, mid + half); }
+      return;
+    }
+    if (d.kind === 'xscale') { // left squeezes more candles in, right spreads them out; the right edge stays put
+      if (d.moved) { const slots = this.clampSlots(d.slots0 * Math.exp((d.start.x - p.x) * 0.006)); this.setView(d.first0 + d.slots0 - slots, slots); }
+      return;
+    }
     if (d.kind === 'pan') {
-      if (d.moved) { this.host.style.cursor = 'grabbing'; this.setView(d.first0 - (p.x - d.start.x) / d.cw0, d.slots0); }
-      else this.drawOver();
+      if (d.moved) {
+        this.host.style.cursor = 'grabbing';
+        // once the price scale has been set by hand, the chart also moves up and down with the finger
+        if (this.ys) { const dp = (p.y - d.start.y) / g.plot.h * (d.hi0 - d.lo0); this.ys = { lo: d.lo0 + dp, hi: d.hi0 + dp }; }
+        this.setView(d.first0 - (p.x - d.start.x) / d.cw0, d.slots0);
+      } else this.drawOver();
       return;
     }
     if (d.kind === 'new') d.b = at;
@@ -223,11 +254,17 @@ export class PriceChart {
       this.syncTouch(); this.ui();
     } else if (d.kind === 'pan') {
       if (!d.moved && !cancelled) {
-        const now = performance.now(), again = this.lastTap && now - this.lastTap.t < 320 && Math.hypot(p.x - this.lastTap.x, p.y - this.lastTap.y) < 28;
+        const now = performance.now(), again = this.lastTap && !this.lastTap.zone && now - this.lastTap.t < 320 && Math.hypot(p.x - this.lastTap.x, p.y - this.lastTap.y) < 28;
         this.lastTap = again ? null : { t: now, x: p.x, y: p.y };
         if (d.hit) { this.sel = d.hit.d.id; this.drawing = true; this.syncTouch(); this.ui(); }
         else if (this.sel) { this.sel = null; this.syncTouch(); this.ui(); }
         else if (again) this.resetView(); // two quick taps on the chart itself go back to the automatic view
+      }
+    } else if (d.kind === 'yscale' || d.kind === 'xscale') {
+      if (!d.moved && !cancelled) { // two quick taps on an axis hand that axis back to the automatic fit
+        const now = performance.now(), again = this.lastTap && this.lastTap.zone === d.kind && now - this.lastTap.t < 320;
+        this.lastTap = again ? null : { t: now, x: p.x, y: p.y, zone: d.kind };
+        if (again) { if (d.kind === 'yscale') this.ys = null; else this.view = null; this.syncTouch(); this.redraw(); this.ui(); }
       }
     } else {
       // a level or a line was placed or moved
@@ -279,7 +316,7 @@ export class PriceChart {
     // size or the session changes. It is kept where at least a few candles stay on screen.
     const key = sym + '|' + iv + '|' + sess.open;
     if (this.viewKey !== key) {
-      this.viewKey = key; this.view = null; this.sel = null; this.pending = null;
+      this.viewKey = key; this.view = null; this.ys = null; this.sel = null; this.pending = null;
       if (this.drag && this.drag.kind !== 'pinch') this.drag = null;
       this.syncTouch(); this.ui();
     }
@@ -305,6 +342,8 @@ export class PriceChart {
     const ideas = app.ideasFor ? app.ideasFor(sym) : [], focus = ideas.find(d => d.focus) || null;
     if (focus) for (const v of [focus.stop, focus.target]) { if (v > hi && v - hi < span0 * 1.5) hi = v; else if (v < lo && lo - v < span0 * 1.5) lo = v; }
     const pad = (hi - lo) * 0.08 || 0.1; lo -= pad; hi += pad;
+    const autoLo = lo, autoHi = hi;
+    if (this.ys) { lo = this.ys.lo; hi = this.ys.hi; }
     const yv = (v) => plot.y + plot.h - ((v - lo) / (hi - lo)) * plot.h;
     // grid + price axis
     ctx.lineWidth = 1;
@@ -426,7 +465,7 @@ export class PriceChart {
     ctx.beginPath(); ctx.moveTo(xi(li) > plot.x + plot.w ? plot.x : Math.max(plot.x, xi(li)), ly); ctx.lineTo(plot.x + plot.w, ly); ctx.stroke(); ctx.setLineDash([]);
     rr(ctx, plot.x + plot.w + 2, ly - 9, axisW - 2, 18, 4); ctx.fillStyle = C.sky; ctx.fill();
     txt(ctx, fmtPrice(last), plot.x + plot.w + axisW / 2 + 1, ly + 0.5, { size: 10.5, weight: 600, fam: F.mono, color: '#04121c', align: 'center', base: 'middle' });
-    this.geo = { W, H, plot, pts, xi, yv, cw, first, lo, hi, axisW, slots, full, open: sess.open, ivMs };
+    this.geo = { W, H, plot, pts, xi, yv, cw, first, lo, hi, autoLo, autoHi, axisW, slots, full, open: sess.open, ivMs };
     this.drawOver();
   }
 
