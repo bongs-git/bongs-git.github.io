@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050709">
+<meta name="robots" content="noindex">
+<title>Connect Schwab · INDAI</title>
+<link rel="icon" href="./icons/icon-192.png">
+<style>
+  :root { --ink:#050709; --panel:#0a0e14; --raised:#111721; --line:rgba(255,255,255,.12); --text:#f3f1ea; --dim:#9aa3b2; --gold:#dcbf6e; --gold-ink:#17120a; --up:#3ecf8e; --down:#f2706b; }
+  * { box-sizing: border-box; }
+  html { background: var(--ink); color-scheme: dark; -webkit-text-size-adjust: 100%; }
+  body { margin: 0; min-height: 100dvh; background: var(--ink); color: var(--text); font: 400 16px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; padding: max(20px, env(safe-area-inset-top)) 16px 40px; }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; }
+  .dim { color: var(--dim); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 16px 0; }
+  .step { display: flex; gap: 10px; align-items: baseline; font-weight: 600; margin-bottom: 8px; }
+  .step b { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--raised); border: 1px solid var(--line); display: grid; place-items: center; font-size: 14px; }
+  a.btn, button { display: block; width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; font-weight: 600; text-align: center; text-decoration: none; padding: 11px 14px; cursor: pointer; touch-action: manipulation; }
+  a.btn.gold, button.gold { background: var(--gold); color: var(--gold-ink); border-color: transparent; }
+  a.btn[aria-disabled="true"], button:disabled { opacity: .45; pointer-events: none; }
+  input { width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: inherit; padding: 10px 12px; margin-bottom: 10px; }
+  #state { font-weight: 600; }
+  #state.ok { color: var(--up); } #state.bad { color: var(--down); }
+  #out { min-height: 1.5em; } #out.ok { color: var(--up); } #out.bad { color: var(--down); }
+  .quiet { background: none; border: 0; color: var(--dim); font-weight: 400; text-decoration: underline; min-height: 44px; width: auto; padding: 8px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Connect Schwab</h1>
+  <p class="dim">Lets INDAI read live quotes, option chains and candles from your own Schwab account. It cannot place trades from here.</p>
+
+  <div class="card" id="passcard" hidden>
+    <label for="pass">Your INDAI passcode</label>
+    <input id="pass" type="password" autocomplete="current-password" placeholder="Passcode">
+    <button id="passgo" class="gold">Continue</button>
+  </div>
+
+  <div class="card">
+    <p id="state" role="status">Checking…</p>
+    <p class="dim" id="detail"></p>
+    <button id="off" class="quiet" hidden>Disconnect Schwab</button>
+  </div>
+
+  <div id="steps" hidden>
+    <div class="card">
+      <div class="step"><b>1</b><span>Sign in at Schwab and approve</span></div>
+      <p class="dim">It opens in a new tab. At the end Schwab sends you to a page that fails to load. That is expected.</p>
+      <a id="go" class="btn gold" target="_blank" rel="noopener" aria-disabled="true" href="#">Open Schwab sign-in</a>
+    </div>
+    <div class="card">
+      <div class="step"><b>2</b><span>Copy that page's address and bring it here</span></div>
+      <p class="dim">Tap the address bar of the page that failed to load, copy the whole address, come back to this tab and tap the button. You have about 30 seconds, so do it straight away.</p>
+      <button id="paste" class="gold">Paste and connect</button>
+      <p class="dim" style="margin:12px 0 6px">Or paste it here yourself:</p>
+      <input id="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://127.0.0.1/?code=…">
+      <button id="connect">Connect</button>
+    </div>
+  </div>
+  <p id="out" role="status"></p>
+  <p><a class="dim" href="./">Back to INDAI</a></p>
+</main>
+<script type="module">
+import { RELAY_URL, RELAY_ANON } from './js/relay.js';
+const $ = (id) => document.getElementById(id);
+const saved = () => { try { return (JSON.parse(localStorage.getItem('jarvis.settings.v1') || 'null') || {}).researchPass || ''; } catch { return ''; } };
+let pass = saved();
+const when = (iso) => new Date(iso).toLocaleString(undefined, { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const say = (el, text, kind = '') => { el.textContent = text; el.className = kind; };
+
+async function ask(body) {
+  const r = await fetch(`${RELAY_URL}/functions/v1/indai-schwab`, {
+    method: 'POST', headers: { apikey: RELAY_ANON, Authorization: `Bearer ${RELAY_ANON}`, 'Content-Type': 'application/json', 'x-indai-pass': pass },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.message || `Something went wrong (${r.status}).`); e.status = r.status; e.code = j.error; throw e; }
+  return j;
+}
+function show(s) {
+  $('passcard').hidden = true;
+  if (!s.configured) {
+    say($('state'), 'Schwab is not set up yet.', 'bad');
+    $('detail').textContent = 'Add SCHWAB_APP_KEY and SCHWAB_APP_SECRET to the Supabase secrets, then open this page again.';
+    $('steps').hidden = true; $('off').hidden = true; return;
+  }
+  if (s.connected) {
+    say($('state'), 'Connected.', 'ok');
+    $('detail').textContent = `Schwab will ask you to sign in again by ${when(s.sign_in_by)} (${s.days_left} days from now). You can do it early: steps 1 and 2 below.`;
+  } else {
+    say($('state'), 'Not connected.', 'bad');
+    $('detail').textContent = 'Two steps, about a minute. Schwab asks for this again every seven days.';
+  }
+  $('off').hidden = !s.connected; $('steps').hidden = false;
+}
+async function load() {
+  if (!pass) { $('passcard').hidden = false; say($('state'), 'Enter your passcode to begin.'); return; }
+  try {
+    const s = await ask({ op: 'status' });
+    show(s);
+    if (s.configured) { const { url } = await ask({ op: 'start' }); $('go').href = url; $('go').setAttribute('aria-disabled', 'false'); }
+  } catch (e) {
+    if (e.status === 401) { pass = ''; $('passcard').hidden = false; say($('state'), 'That passcode was not accepted.', 'bad'); }
+    else if (e.status === 404) say($('state'), 'This part of INDAI is not switched on yet.', 'bad');
+    else say($('state'), e.message, 'bad');
+  }
+}
+async function finish(text) {
+  if (!text || !text.trim()) { say($('out'), 'Nothing to paste yet. Copy the address of the page that failed to load first.', 'bad'); return; }
+  $('paste').disabled = $('connect').disabled = true; say($('out'), 'Connecting…');
+  try {
+    const s = await ask({ op: 'finish', url: text.trim() });
+    show(s); $('url').value = '';
+    const t = s.test || {};
+    say($('out'), t.ok ? `Connected. First quote from Schwab: SPY ${Number(t.price).toFixed(2)}, ${t.realtime ? 'live' : 'delayed'}.` : 'Connected, but the first quote did not come through. INDAI will keep trying.', 'ok');
+  } catch (e) { say($('out'), e.message, 'bad'); }
+  finally { $('paste').disabled = $('connect').disabled = false; }
+}
+$('passgo').onclick = () => { pass = $('pass').value.trim(); load(); };
+$('pass').onkeydown = (e) => { if (e.key === 'Enter') $('passgo').click(); };
+$('paste').onclick = async () => {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch { say($('out'), 'Your browser did not allow reading the clipboard. Paste the address into the box below and tap Connect.', 'bad'); $('url').focus(); return; }
+  finish(text);
+};
+$('connect').onclick = () => finish($('url').value);
+$('url').onkeydown = (e) => { if (e.key === 'Enter') finish($('url').value); };
+$('off').onclick = async () => { try { show(await ask({ op: 'disconnect' })); say($('out'), 'Disconnected. INDAI has forgotten the Schwab sign-in.'); } catch (e) { say($('out'), e.message, 'bad'); } };
+load();
+</script>
+</body>
+</html>
