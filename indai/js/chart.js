@@ -1,12 +1,12 @@
 // Canvas drawing for the website: the main candlestick chart (VWAP, EMA clouds, GEX levels),
 // watchlist sparklines, the lead/lag lines and the calculator's payoff curve.
 // Everything is drawn in CSS pixels on a canvas scaled for the screen's pixel density.
-import { ema, vwap, fmtHM, chartSession, INTERVAL_MS } from './market.js';
+import { ema, vwap, fmtHM, etParts, chartSession, INTERVAL_MS } from './market.js';
 import { LEADLAG } from './feeds.js';
 import { positionPnl, expiryCloseMs } from './options.js';
 import { C, F, fmtPrice, fmtPct, fmtVol, fmtMoney, hexA, colorFor } from './hud.js';
 import { levelSourceLabel } from './panels.js';
-import { drawingsFor, addDrawing, removeDrawing, clearDrawings, saveDrawings, distToSegment } from './draw.js';
+import { drawingsFor, addDrawing, removeDrawing, clearDrawings, saveDrawings, startDrawingEdit, finishDrawingEdit, canUndoDrawing, undoDrawing, distToSegment } from './draw.js';
 
 const DPR = () => Math.min(3, window.devicePixelRatio || 1);
 const MIN_SLOTS = 8;
@@ -69,6 +69,8 @@ export class PriceChart {
     // Drawing: whether the drawing bar is open, the tool in hand, the selected drawing, the gesture in progress,
     // and the first point of a line that is being placed with two taps.
     this.drawing = false; this.tool = 'move'; this.sel = null; this.drag = null; this.pending = null;
+    this.loupe = document.createElement('canvas'); this.loupe.className = 'chart-magnifier'; this.loupe.hidden = true; this.loupe.setAttribute('aria-hidden', 'true'); host.append(this.loupe);
+    this.loupeTimer = 0;
     this.ptrs = new Map(); this.raf = 0; this.lastTap = null; this.swallow = false; this.hoverTimer = 0; this.onUi = null;
     new ResizeObserver(() => { app.markDirty('chart'); }).observe(host);
     this.bind();
@@ -87,14 +89,22 @@ export class PriceChart {
       if (!this.geo) { this.drawOver(); return; }
       try { host.setPointerCapture(ev.pointerId); } catch { /* the pointer is already gone */ }
       if (this.ptrs.size === 2) this.startPinch();
-      else if (this.ptrs.size === 1) this.down(p, ev.pointerType !== 'mouse');
+      else if (this.ptrs.size === 1) {
+        this.down(p, ev.pointerType !== 'mouse');
+        if (ev.pointerType === 'touch' && this.drawing && this.drag && !['pan', 'yscale', 'xscale'].includes(this.drag.kind)) {
+          this.loupeTimer = setTimeout(() => { this.loupe.hidden = false; this.drawOver(); }, 450);
+        }
+      }
     });
     host.addEventListener('pointermove', (ev) => {
       const p = pos(ev);
       if (this.ptrs.has(ev.pointerId)) this.ptrs.set(ev.pointerId, p);
       if (this.drag && this.drag.kind === 'pinch') { this.pinch(); return; }
       this.hover = p;
-      if (this.drag) this.move(p);
+      if (this.drag) {
+        if (this.loupe.hidden && Math.hypot(p.x - this.drag.start?.x, p.y - this.drag.start?.y) > 8) clearTimeout(this.loupeTimer);
+        this.move(p);
+      }
       else {
         if (ev.pointerType === 'mouse') host.style.cursor = this.tool === 'move' && this.hit(p, false) ? 'pointer' : '';
         this.drawOver();
@@ -103,6 +113,7 @@ export class PriceChart {
     const end = (ev, cancelled) => {
       if (!this.ptrs.delete(ev.pointerId)) return;
       const p = pos(ev);
+      clearTimeout(this.loupeTimer); this.loupe.hidden = true;
       if (this.drag && this.drag.kind === 'pinch') { this.drag = null; this.hover = null; this.drawOver(); }
       else if (this.swallow) { /* the finger left over from a pinch does nothing */ }
       else this.up(p, cancelled);
@@ -155,18 +166,25 @@ export class PriceChart {
   state() {
     const g = this.geo;
     return { drawing: this.drawing, tool: this.tool, selected: !!this.sel, pending: !!this.pending, manual: !!(this.view || this.ys),
-      count: g ? drawingsFor(this.app.settings.main, g.open).length : 0 };
+      undo: canUndoDrawing(this.app.settings.main), count: g ? drawingsFor(this.app.settings.main, g.open).length : 0 };
   }
   setDrawing(on) {
     this.drawing = !!on;
-    if (!on) { this.tool = 'move'; this.pending = null; this.sel = null; }
+    if (!on) { finishDrawingEdit(this.app.settings.main, false); this.drag = null; clearTimeout(this.loupeTimer); this.loupe.hidden = true; this.tool = 'move'; this.pending = null; this.sel = null; }
     this.syncTouch(); this.ui(); this.drawOver();
   }
   setTool(tool) {
+    finishDrawingEdit(this.app.settings.main, false);
+    this.drag = null;
     this.tool = this.tool === tool ? 'move' : tool;
     this.pending = null;
     if (this.tool !== 'move') { this.sel = null; this.drawing = true; }
     this.syncTouch(); this.ui(); this.drawOver();
+  }
+  undo() {
+    finishDrawingEdit(this.app.settings.main, false);
+    if (!undoDrawing(this.app.settings.main)) return;
+    this.sel = null; this.pending = null; this.drag = null; this.syncTouch(); this.ui(); this.drawOver();
   }
   deleteSelected() {
     if (!this.sel) return;
@@ -186,7 +204,7 @@ export class PriceChart {
     const list = drawingsFor(this.app.settings.main, g.open), near = coarse ? 20 : 11, edge = coarse ? 13 : 7;
     const ends = (d) => [xOf(g, d.a.t), g.yv(d.a.p), xOf(g, d.b.t), g.yv(d.b.p)];
     const picked = list.find(d => d.id === this.sel);
-    if (picked && picked.type === 'line') { // the ends of the selected line win over anything lying across them
+    if (picked && ['line', 'rect'].includes(picked.type)) { // the ends of the selected line win over anything lying across them
       const [ax, ay, bx, by] = ends(picked);
       if (Math.hypot(p.x - ax, p.y - ay) <= near) return { d: picked, part: 'a' };
       if (Math.hypot(p.x - bx, p.y - by) <= near) return { d: picked, part: 'b' };
@@ -194,7 +212,17 @@ export class PriceChart {
     for (let n = list.length - 1; n >= 0; n--) {
       const d = list[n];
       if (d.type === 'level') { if (d.p <= g.hi && d.p >= g.lo && Math.abs(p.y - g.yv(d.p)) <= edge) return { d, part: 'level' }; continue; }
+      if (d.type === 'ray') {
+        const ax = xOf(g, d.a.t), ay = g.yv(d.a.p);
+        if (p.x >= ax - edge && Math.abs(p.y - ay) <= edge) return { d, part: 'ray' };
+        continue;
+      }
       const [ax, ay, bx, by] = ends(d);
+      if (d.type === 'rect') {
+        const nearBorder = Math.min(distToSegment(p.x, p.y, ax, ay, bx, ay), distToSegment(p.x, p.y, bx, ay, bx, by), distToSegment(p.x, p.y, bx, by, ax, by), distToSegment(p.x, p.y, ax, by, ax, ay));
+        if (nearBorder <= edge) return { d, part: 'body' };
+        continue;
+      }
       if (distToSegment(p.x, p.y, ax, ay, bx, by) <= edge) return { d, part: 'body' };
     }
     return null;
@@ -208,16 +236,18 @@ export class PriceChart {
     if (p.y > bottom && p.x >= g.plot.x && p.x <= right) { this.drag = { kind: 'xscale', start: p, first0: g.first, slots0: g.slots, moved: false }; return; }
     if (!inPlot(g, p)) return;
     const at = { t: tOf(g, p.x), p: pOf(g, p.y) }, sym = this.app.settings.main;
-    if (this.tool === 'line') {
-      this.drag = { kind: 'new', a: this.pending || at, b: at, start: p, second: !!this.pending };
-    } else if (this.tool === 'level') {
-      const d = addDrawing(sym, { type: 'level', p: at.p });
-      this.sel = d.id; this.drag = { kind: 'level', d, start: p, moved: true };
+    if (['line', 'rect'].includes(this.tool)) {
+      startDrawingEdit(sym);
+      this.drag = { kind: 'new', type: this.tool, a: this.pending || at, b: at, start: p, second: !!this.pending };
+    } else if (['level', 'ray'].includes(this.tool)) {
+      startDrawingEdit(sym);
+      const d = addDrawing(sym, this.tool === 'ray' ? { type: 'ray', a: at } : { type: 'level', p: at.p });
+      this.sel = d.id; this.drag = { kind: this.tool, d, start: p, moved: true };
       this.ui();
     } else {
       const hit = this.hit(p, coarse);
       // A drawing is first tapped to select it; once selected, dragging moves it. Anything else moves the chart.
-      if (hit && hit.d.id === this.sel) this.drag = { kind: hit.part, d: hit.d, start: p, from: at, a0: hit.d.a && { ...hit.d.a }, b0: hit.d.b && { ...hit.d.b }, moved: false };
+      if (hit && hit.d.id === this.sel) { startDrawingEdit(sym); this.drag = { kind: hit.part, d: hit.d, start: p, from: at, a0: hit.d.a && { ...hit.d.a }, b0: hit.d.b && { ...hit.d.b }, moved: false }; }
       else this.drag = { kind: 'pan', start: p, first0: g.first, slots0: g.slots, cw0: g.cw, lo0: g.lo, hi0: g.hi, hit, moved: false };
     }
     this.drawOver();
@@ -246,6 +276,7 @@ export class PriceChart {
     }
     if (d.kind === 'new') d.b = at;
     else if (d.kind === 'level') d.d.p = at.p;
+    else if (d.kind === 'ray') d.d.a = at;
     else if (d.kind === 'a' || d.kind === 'b') d.d[d.kind] = at;
     else if (d.kind === 'body') {
       const dt = at.t - d.from.t, dp = at.p - d.from.p;
@@ -258,14 +289,15 @@ export class PriceChart {
     this.drag = null;
     this.host.style.cursor = '';
     if (!d) return;
+    if (cancelled) { finishDrawingEdit(sym, false); this.pending = null; this.sel = null; this.ui(); this.drawOver(); return; }
     if (d.kind === 'new') {
       const far = Math.hypot(p.x - d.start.x, p.y - d.start.y) >= 10;
       if (cancelled || !g) this.pending = null;
       else if (d.second || far) {
         // a drag from start to end, or the second of two taps
         const long = Math.hypot(xOf(g, d.a.t) - xOf(g, d.b.t), g.yv(d.a.p) - g.yv(d.b.p)) >= 8;
-        if (long) this.sel = addDrawing(sym, { type: 'line', day: g.open, a: d.a, b: d.b }).id;
-        this.pending = null; this.tool = 'move';
+        if (long) this.sel = addDrawing(sym, { type: d.type, day: g.open, a: d.a, b: d.b }).id;
+        this.pending = null; this.tool = 'move'; finishDrawingEdit(sym);
       } else this.pending = d.a; // one tap: the start is placed, the next tap ends the line
       this.syncTouch(); this.ui();
     } else if (d.kind === 'pan') {
@@ -284,14 +316,15 @@ export class PriceChart {
       }
     } else {
       // a level or a line was placed or moved
-      if (d.kind === 'level' && this.tool === 'level') this.tool = 'move';
+      if (['level', 'ray'].includes(d.kind) && this.tool === d.kind) this.tool = 'move';
       saveDrawings(); this.syncTouch(); this.ui();
     }
     this.drawOver();
   }
   startPinch() {
     const g = this.geo, [a, b] = [...this.ptrs.values()];
-    if (this.drag && ['level', 'a', 'b', 'body'].includes(this.drag.kind)) saveDrawings();
+    finishDrawingEdit(this.app.settings.main, false);
+    this.pending = null; clearTimeout(this.loupeTimer); this.loupe.hidden = true;
     this.drag = { kind: 'pinch', d0: Math.max(24, Math.hypot(a.x - b.x, a.y - b.y)), mid0: (a.x + b.x) / 2, first0: g.first, slots0: g.slots, cw0: g.cw };
     this.swallow = true; this.hover = null;
     this.drawOver();
@@ -332,6 +365,7 @@ export class PriceChart {
     // size or the session changes. It is kept where at least a few candles stay on screen.
     const key = sym + '|' + iv + '|' + sess.open;
     if (this.viewKey !== key) {
+      finishDrawingEdit(this.viewKey.split('|')[0], false);
       this.viewKey = key; this.view = null; this.ys = null; this.sel = null; this.pending = null;
       if (this.drag && this.drag.kind !== 'pinch') this.drag = null;
       this.syncTouch(); this.ui();
@@ -386,15 +420,20 @@ export class PriceChart {
       ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
       if (!dayXs.length || x - dayXs[dayXs.length - 1] > 44) { txt(ctx, fmtDay(t), x + 4, plot.y + plot.h + 15, { size: 10.5, weight: 600, color: C.dim }); dayXs.push(x); }
     }
-    for (let m = 570, lastX = -99; m <= 960; m += 5) {
-      if ((m - 600) % everyMin) continue;
-      const t = sess.open + (m - 570) * 60e3;
-      if (t > sess.close) break;
-      const x = Math.round(plot.x + ((t - sess.open) / ivMs - first) * cw) + 0.5;
+    const labels = hs ? hs.bars.map((bar, index) => ({ t: bar.t, slot: index - HN })) : [];
+    for (let minute = 570; minute <= 960; minute += 5) {
+      const t = sess.open + (minute - 570) * 60000;
+      if (t <= sess.close) labels.push({ t, slot: (t - sess.open) / ivMs });
+    }
+    let lastX = -99;
+    for (const label of labels) {
+      const parts = etParts(label.t);
+      if ((parts.h * 60 + parts.mi - 600) % everyMin) continue;
+      const x = Math.round(plot.x + (label.slot - first) * cw) + 0.5;
       if (x < plot.x + 8 || x > plot.x + plot.w - 4 || x - lastX < 46 || dayXs.some(d => x - d > -30 && x - d < 50)) continue;
       lastX = x;
       ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
-      txt(ctx, fmtHM(t).replace(':00', '').replace(' ', '').toLowerCase(), x, plot.y + plot.h + 15, { size: 10.5, color: C.faint, align: 'center' });
+      txt(ctx, fmtHM(label.t).replace(':00', '').replace(' ', '').toLowerCase(), x, plot.y + plot.h + 15, { size: 10.5, color: C.faint, align: 'center' });
     }
     ctx.save(); ctx.beginPath(); ctx.rect(plot.x, plot.y - 4, plot.w, plot.h + 8); ctx.clip();
     if (s.show.ema) {
@@ -516,8 +555,22 @@ export class PriceChart {
       ctx.globalAlpha = 1;
       return [[ax, ay], [bx, by]];
     };
+    const rectangle = (a, b, on) => {
+      const ax = xOf(g, a.t), ay = g.yv(a.p), bx = xOf(g, b.t), by = g.yv(b.p);
+      ctx.fillStyle = hexA(C.violet, 0.13); ctx.strokeStyle = on ? C.white : C.violet; ctx.lineWidth = on ? 2 : 1.4;
+      ctx.fillRect(ax, ay, bx - ax, by - ay); ctx.strokeRect(ax, ay, bx - ax, by - ay);
+      return [[ax, ay], [bx, by]];
+    };
     for (const d of list) {
       const on = d.id === this.sel;
+      if (d.type === 'rect') { const ends = rectangle(d.a, d.b, on); if (on) handles.push(...ends); continue; }
+      if (d.type === 'ray') {
+        const ax = xOf(g, d.a.t), ay = g.yv(d.a.p);
+        ctx.strokeStyle = on ? C.white : C.violet; ctx.lineWidth = on ? 2 : 1.4;
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(right, ay); ctx.stroke();
+        if (on) handles.push([ax, ay]);
+        continue;
+      }
       if (d.type === 'line') { const ends = line(d.a, d.b, on, false); if (on) handles.push(...ends); continue; }
       if (d.p > g.hi || d.p < g.lo) continue;
       const y = Math.round(g.yv(d.p)) + 0.5;
@@ -526,10 +579,10 @@ export class PriceChart {
       tags.push({ y, p: d.p, on });
       if (on) handles.push([right - 16, y]);
     }
-    if (this.drag && this.drag.kind === 'new') handles.push(...line(this.drag.a, this.drag.b, true, true));
-    else if (this.pending && this.tool === 'line') {
+    if (this.drag && this.drag.kind === 'new') handles.push(...(this.drag.type === 'rect' ? rectangle(this.drag.a, this.drag.b, true) : line(this.drag.a, this.drag.b, true, true)));
+    else if (this.pending && ['line', 'rect'].includes(this.tool)) {
       const a = this.pending, h = this.hover;
-      if (h && inPlot(g, h)) line(a, { t: tOf(g, h.x), p: pOf(g, h.y) }, true, true);
+      if (h && inPlot(g, h)) { const b = { t: tOf(g, h.x), p: pOf(g, h.y) }; if (this.tool === 'rect') rectangle(a, b, true); else line(a, b, true, true); }
       handles.push([xOf(g, a.t), g.yv(a.p)]);
     }
     for (const [x, y] of handles) { ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill(); ctx.strokeStyle = C.white; ctx.lineWidth = 2; ctx.stroke(); }
@@ -541,11 +594,25 @@ export class PriceChart {
   }
 
   // drawings, crosshair and candle read-out, on their own layer so moving a finger never redraws the candles
+  drawMagnifier() {
+    const p = this.hover;
+    if (this.loupe.hidden || !p) return;
+    const size = 112, ratio = this.base.width / this.base.clientWidth;
+    this.loupe.width = size * DPR(); this.loupe.height = size * DPR();
+    const ctx = this.loupe.getContext('2d'); ctx.scale(DPR(), DPR());
+    ctx.fillStyle = C.ink; ctx.fillRect(0, 0, size, size);
+    for (const canvas of [this.base, this.over]) ctx.drawImage(canvas, (p.x - 28) * ratio, (p.y - 28) * ratio, 56 * ratio, 56 * ratio, 0, 0, size, size);
+    ctx.strokeStyle = C.white; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.moveTo(44, 56); ctx.lineTo(68, 56); ctx.moveTo(56, 44); ctx.lineTo(56, 68); ctx.stroke();
+    this.loupe.style.left = Math.max(4, Math.min(this.host.clientWidth - size - 4, p.x - size / 2)) + 'px';
+    this.loupe.style.top = (p.y > 150 ? p.y - 140 : Math.min(this.host.clientHeight - size - 4, p.y + 30)) + 'px';
+  }
   drawOver() {
     const { ctx, w: W } = fit(this.over);
     const g = this.geo, h = this.hover;
     if (!g) return;
     this.drawMarks(ctx, g);
+    this.drawMagnifier();
     if (!h || (this.drag && this.drag.kind === 'pinch')) return;
     const { plot, pts, xi, cw, first, lo, hi, axisW } = g;
     if (h.x < plot.x || h.x > plot.x + plot.w || h.y < plot.y || h.y > plot.y + plot.h) return;

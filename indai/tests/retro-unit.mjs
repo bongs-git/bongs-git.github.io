@@ -1,5 +1,5 @@
 // The retrospective's arithmetic, on hand-made candles and results where the right answer is known.
-import { evalIdea, evalPullback, summarize, groups, propose, tuneIdea, tunedScore, keysOf, fmtR, GRID, BASE, NO_TUNING, sameTuning, record, dayFacts, metrics, backtest, walkForward, tvCode, plainFlag } from '/home/claude/bongs-git.github.io/indai/js/retro.js';
+import { evalIdea, evalPullback, summarize, groups, propose, tuneIdea, tunedScore, keysOf, fmtR, GRID, BASE, NO_TUNING, sameTuning, record, dayFacts, metrics, backtest, walkForward, tvCode, plainFlag } from '../js/retro.js';
 let failed = 0; const check = (l, ok, x = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${l} ${ok ? '' : x}`); };
 const T0 = Date.UTC(2026, 10, 19, 15, 0);                       // 10:00 New York
 const bar = (i, h, l, c = (h + l) / 2) => ({ t: T0 + i * 60e3, o: c, h, l, c, v: 1000 });
@@ -97,7 +97,7 @@ check('warnings are grouped by their words, exactly as the TradingView script sp
 check('time-of-day warnings are not counted twice (the time window already covers them)', (() => { const c = tuneIdea({ sym: 'SPY', strat: 'vwap', dir: 1, title: 'VWAP reclaim', against: texts, score: 70, price: 100, stop: 99, target: 102, rr: 2 }, { adj: { 'flag:last 20 minutes': -9, 'flag:lunch chop window': -9, 'flag:against the 34/50 trend': -4 }, labels: {}, minAdd: 0, stop: 1, target: 1 }, T0); return c.score === 66; })());
 // every flag key the script looks up exists in the app's spelling
 import { readFileSync } from 'node:fs';
-const pine = readFileSync('/home/claude/bongs-git.github.io/indai/tradingview/indai-backtest.pine', 'utf8');
+const pine = readFileSync(new URL('../tradingview/indai-backtest.pine', import.meta.url), 'utf8');
 const pineFlags = [...pine.matchAll(/"flag:([^"]+)"/g)].map(x => x[1]).sort(), appFlags = [...new Set(texts.map(plainFlag))].filter(f => !/lunch chop|last 20/.test(f)).sort();
 check('the TradingView script looks up the same warning names the app writes', J(pineFlags) === J(appFlags), J({ pineFlags, appFlags }));
 const pineKinds = [...pine.matchAll(/rate\(\d, [^,]+, [\d.]+, "([^"]+)"\)/g)].map(x => x[1]);

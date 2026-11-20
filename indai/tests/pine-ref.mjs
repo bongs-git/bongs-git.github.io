@@ -1,7 +1,7 @@
 // A bar-by-bar version of the scanner, written the way a TradingView script has to work (one bar at a time, running
 // state, no look-back over the whole day), checked here against the app's real scanner on thousands of candles.
 // The TradingView script (indai/tradingview/indai-backtest.pine) is this file translated line for line.
-import { scanSetups } from '/home/claude/bongs-git.github.io/indai/js/signals.js';
+import { scanSetups } from '../js/signals.js';
 
 export class BarByBar {
   constructor(levels = {}) { this.lv = levels; this.si = -1; }

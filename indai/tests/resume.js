@@ -1,7 +1,7 @@
 // Real-data mode on a phone: dropped requests must not block the next ones, prices refresh on resume,
 // and the morning chart fills the screen with labels that don't overlap.
-const { chromium } = require('playwright');
-const OUT = __dirname, URL = 'http://127.0.0.1:8765/indai/';
+const { chromium } = require('./browser.cjs');
+const OUT = __dirname, URL = process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failed = 0;
 const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra}`); };
@@ -12,11 +12,10 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
   for (let i = 0; i < n; i++) { const o = p; p = p * (1 + rnd() * 0.0012 - (sym === 'QQQ' && i > 25 && i < 70 ? 0.00045 : 0)); out.push([571 + i, +o.toFixed(2), +(Math.max(o, p) * 1.0004).toFixed(2), +(Math.min(o, p) * 0.9996).toFixed(2), +p.toFixed(2), 30000]); }
   return out; }
 (async () => {
-  const browser = await chromium.launch();
-  const n = minutesSoFar(); console.log('   minutes of session in the mock:', n);
-  if (n < 20) { console.log('   (market not open long enough right now for the morning-chart check; skipping)'); process.exit(0); }
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+  const n = 90; console.log('   minutes of session in the mock:', n);
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
-  const page = await ctx.newPage(); const errs = []; page.on('pageerror', e => errs.push(e.message));
+  const page = await ctx.newPage(); await page.clock.install({time:new Date('2026-11-19T16:15:00Z')}); const errs = []; page.on('pageerror', e => errs.push(e.message));
   let drop = false; const seen = { snapshot: 0, dropped: 0 };
   await page.route('**://zptjziewsfuvfcogrikz.supabase.co/**', async (route) => {
     const req = route.request(), u = new globalThis.URL(req.url()), q = u.searchParams;
@@ -26,11 +25,11 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
     if (u.pathname.endsWith('/indai-market')) {
       const kind = q.get('kind'), syms = (q.get('symbols') || '').split(',').filter(s => PX[s]);
       if (kind === 'snapshot') { seen.snapshot++; return json({ quotes: syms.map(s => { const b = bars(s, n), c = b[b.length - 1][4]; return { symbol: s, ok: true, price: c, close: c, prevClose: PX[s] * 1.004, open: b[0][1], high: Math.max(...b.map(x => x[2])), low: Math.min(...b.map(x => x[3])), iv30: 19, timestamp: new Date().toISOString() }; }) }); }
-      if (kind === 'bars') return json({ bars: Object.fromEntries(syms.map(s => [s, { session: etYMD(new Date()), bars: bars(s, n) }])) });
+      if (kind === 'bars') return json({ bars: Object.fromEntries(syms.map(s => [s, { session: '2026-11-19', bars: bars(s, n) }])) });
       return json({ error: 'not in this mock' });
     }
     if (u.pathname.endsWith('/indai-tv')) return json(q.get('bars') ? { bars: [] } : { alerts: [] });
-    if (u.pathname.endsWith('/indai_gex_levels')) { const t = etYMD(new Date()); return json([{ ticker: 'QQQ', scope: 'A', asof_et: `${t} 08:46`, call_wall: 680, put_wall: 650, call_wall2: null, put_wall2: 670, gamma_flip: 670.47 }, { ticker: 'QQQ', scope: 'N', asof_et: `${t} 08:46`, expiry: t, call_wall: 680, put_wall: 664, gamma_flip: 670.47 }]); }
+    if (u.pathname.endsWith('/indai_gex_levels')) { const t = '2026-11-19'; return json([{ ticker: 'QQQ', scope: 'A', asof_et: `${t} 08:46`, call_wall: 680, put_wall: 650, call_wall2: null, put_wall2: 670, gamma_flip: 670.47 }, { ticker: 'QQQ', scope: 'N', asof_et: `${t} 08:46`, expiry: t, call_wall: 680, put_wall: 664, gamma_flip: 670.47 }]); }
     if (u.pathname.endsWith('/indai-brain')) return json({ configured: false });
     return json({});
   });
@@ -54,7 +53,7 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
   const took = Date.now() - t0, st2 = await A(() => window.__indai.app.feed.status.cboe);
   check('after dropped requests the feed recovers within seconds, with no lock-out', st1 === 'err' && st2 === 'ok' && took < 7000 && seen.snapshot > before, JSON.stringify({ st1, st2, tookMs: took, dropped: seen.dropped }));
   const badge = await A(() => document.getElementById('t-badge').textContent);
-  check('badge is back to normal', /Delayed/.test(badge), badge);
+  check('badge is back to normal', /CBOE, delayed 15 min/.test(badge), badge);
   // 2. coming back to the app pulls fresh prices at once
   await sleep(9000);
   const b2 = seen.snapshot;
@@ -64,7 +63,7 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
   // 3. badge explains how to get live prices
   await page.tap('#t-badge'); await sleep(300);
   const toast = await page.textContent('#toast');
-  check('badge tap explains the delay and how to go live', /Finnhub/.test(toast) && /TradingView/.test(toast), JSON.stringify(toast));
+  check('badge tap explains this ticker’s source and delay', /QQQ/.test(toast) && /CBOE, delayed 15 min/.test(toast), JSON.stringify(toast));
   await page.screenshot({ path: `${OUT}/r-phone-toast.png` });
   check('no page errors', errs.length === 0, errs.join('|'));
   await browser.close();

@@ -99,8 +99,9 @@
           <button type="button" class="btn mini" id="ch-draw" aria-pressed="false" aria-controls="ch-drawbar" aria-label="Draw on the chart"><svg><use href="#ic-pen"/></svg><span>Draw</span></button>
           <div class="drawbar" id="ch-drawbar" hidden>
             <div class="seg" id="ch-tools" role="group" aria-label="Drawing tool">
-              <button type="button" data-tool="line" aria-pressed="false">Trend line</button><button type="button" data-tool="level" aria-pressed="false">Level</button>
+              <button type="button" data-tool="line" aria-pressed="false">Trend line</button><button type="button" data-tool="level" aria-pressed="false">Level</button><button type="button" data-tool="ray" aria-pressed="false">Ray</button><button type="button" data-tool="rect" aria-pressed="false">Rectangle</button>
             </div>
+            <button type="button" class="btn mini" id="ch-undo" disabled>Undo</button>
             <button type="button" class="btn mini" id="ch-del" disabled>Delete</button>
             <button type="button" class="btn mini" id="ch-clear" disabled>Clear all</button>
             <span class="draw-hint" id="ch-hint" role="status"></span>
@@ -114,10 +115,12 @@
       <div class="chart-host" id="chart-host">
         <canvas class="base"></canvas><canvas class="over"></canvas>
         <span class="chart-note" id="ch-note"></span>
+        <span class="history-note" id="ch-history" role="status" hidden></span>
         <div class="axis-y" aria-hidden="true"></div><div class="axis-x" aria-hidden="true"></div>
         <button type="button" class="btn mini chart-reset" id="ch-reset" hidden>Reset view</button>
         <div class="tv-wrap" id="tv-wrap" hidden>
-          <iframe id="tv-frame" title="TradingView chart" credentialless allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+          <iframe id="tv-frame" title="TradingView chart" credentialless sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+          <button type="button" class="btn mini tv-full" id="tv-full">Full screen</button>
           <a class="btn mini tv-out" id="tv-out" target="_blank" rel="noopener">Full TradingView in a new tab</a>
         </div>
       </div>

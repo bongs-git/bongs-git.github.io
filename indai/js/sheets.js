@@ -32,6 +32,12 @@ export function initSheets(app) {
     visible: open('analysis'),
     render() {
       const an = app.analysis, body = $('sb-analysis');
+      if (app.analysisFailure) {
+        $('st-analysis').textContent = `INDAI analysis · ${app.analysisFailure.sym}`;
+        anKey = '';
+        body.innerHTML = `<p class="empty">${esc(app.analysisFailure.message)}</p><button type="button" class="btn" data-act="calc">Open calculator</button>`;
+        return;
+      }
       $('st-analysis').textContent = an ? `INDAI analysis · ${ideaLabel(an.idea)}` : 'INDAI analysis';
       if (!an) { anKey = ''; body.innerHTML = '<p class="empty">Ask INDAI about a trade, for example “QQQ calls expiring today, 665 strike”. She pulls the chain, flow, charts and levels, and rates it red, amber or green.</p>'; return; }
       const key = [an.at, !!an.final, an.pendingAI, an.aiError, an.demo].join('|');
@@ -82,7 +88,7 @@ export function initSheets(app) {
       $('st-deep').textContent = d ? `Deep dive · ${d.sym}` : 'Deep dive';
       if (!d) { body.innerHTML = '<p class="empty">Pick a ticker in the watchlist, or say “deep dive on Tesla”.</p>'; ddKey = ''; return; }
       const q = app.feed.quote(d.sym) || d.quote, t = d.tech, ch = d.chain, lv = app.levelsFor(d.sym);
-      const key = [d.at, d.loading, !!ch, d.news?.length, lv && [lv.cw, lv.pw, lv.zg].join(), t && t.rsi?.toFixed(0)].join('|');
+      const key = [app.marketData.revision, d.at, d.loading, !!ch, d.news?.length, lv && [lv.cw, lv.pw, lv.zg].join(), t && t.rsi?.toFixed(0)].join('|');
       if (key !== ddKey) {
         ddKey = key;
         const rows = [];
@@ -93,6 +99,7 @@ export function initSheets(app) {
         const nw = d.news?.length ? `<p class="sec-title" style="margin-top:16px">Headlines</p><ul class="news">${d.news.slice(0, 6).map(n => `<li class="${esc(n.sentiment || '')}">${esc(n.title)}</li>`).join('')}</ul>` : '';
         body.innerHTML = `<div class="dd-top"><span class="px mono" id="dd-px">—</span><canvas id="dd-spark"></canvas><span class="pc" id="dd-pc">&nbsp;</span></div>
           ${demoNote(d.demo)}
+          ${app.marketData.optionNote(d.sym) ? `<p class="note warn">${esc(app.marketData.optionNote(d.sym))}</p>` : ''}
           <div class="cols two"><div>${rows.length ? kv(rows) : ''}${d.loading ? '<p class="note warn" style="margin-top:10px">Loading options and news…</p>' : !rows.length ? '<p class="empty">No intraday data for this ticker yet.</p>' : ''}</div>
           <div>${un}${nw}${!un && !nw && !d.loading ? '<p class="note">No unusual options prints or headlines right now.</p>' : ''}</div></div>
           <div class="actions"><button type="button" class="btn up" id="dd-calls">Analyze ${esc(d.sym)} calls</button><button type="button" class="btn down" id="dd-puts">Analyze ${esc(d.sym)} puts</button><button type="button" class="btn" id="dd-main">Put on main chart</button><button type="button" class="btn" id="dd-tv">Open in TradingView</button></div>`;
@@ -103,7 +110,7 @@ export function initSheets(app) {
         V.deep._spark = '';
       }
       const px = $('dd-px'), pc = $('dd-pc');
-      if (px) { px.textContent = q ? fmtPrice(q.last) : '—'; pc.textContent = q ? fmtPct(q.pct) : ' '; pc.className = 'pc ' + (q ? cls(q.chg ?? q.pct) : 'flat'); }
+      if (px) { px.textContent = q ? fmtPrice(q.last) : '—'; pc.textContent = q && app.marketData.changeKnown(d.sym) ? fmtPct(q.pct) : '—'; pc.className = 'pc ' + (q ? cls(q.chg ?? q.pct) : 'flat'); }
       const cv = $('dd-spark'), sk = (d.bars?.length || 0) + ':' + cv?.clientWidth;
       if (cv && V.deep._spark !== sk) { V.deep._spark = sk; drawSparkline(cv, d.bars, q?.base); }
     },
@@ -116,7 +123,7 @@ export function initSheets(app) {
       const ms = marketStatus(), rs = app.riskState(), an = app.analysis, main = app.settings.main, lv = app.levelsFor(main);
       const rows = app.settings.symbols.map(sym => {
         const q = app.feed.quote(sym), l = app.levelsFor(sym), n = q && l ? nearestLevel(q.last, l) : null;
-        return `<div class="sum-row${sym === main ? ' sel' : ''}"><b>${sym}</b><span class="n">${n ? `${n.short} ${n.level}` : ''}</span><span class="p">${q ? fmtPrice(q.last) : '—'}</span><span class="c ${q ? cls(q.chg) : 'flat'}">${q ? fmtPct(q.pct) : ''}</span></div>`;
+        return `<div class="sum-row${sym === main ? ' sel' : ''}"><b>${sym}</b><span class="n">${n ? `${n.short} ${n.level}` : ''}</span><span class="p">${q ? fmtPrice(q.last) : '—'}</span><span class="c ${q ? cls(q.chg) : 'flat'}">${q && app.marketData.changeKnown(sym) ? fmtPct(q.pct) : '—'}</span></div>`;
       }).join('');
       const rag = an ? an.final?.rag || an.score.rag : null;
       $('sb-summary').innerHTML = `<p class="note" style="margin-bottom:12px">${fmtClock()} ET · ${esc(ms.label.charAt(0) + ms.label.slice(1).toLowerCase())} · ${ms.nextEvent} in ${fmtDuration(ms.msToNext)}</p>
@@ -283,7 +290,7 @@ function initCalc(app) {
     if (sel._html !== html) { sel._html = html; sel.innerHTML = html; }
     if (document.activeElement !== sel) sel.value = cur;
     $('c-spot').textContent = fmtPrice(spotOf(c));
-    $('c-note').textContent = c.loading ? 'Loading the chain…' : c.demo ? 'Simulated demo prices' : c.strikes ? 'Prices from the CBOE chain (delayed about 15 min)' : 'Model prices (chain not loaded)';
+    $('c-note').textContent = c.chainError ? c.chainError + ' The calculator is showing estimates.' : c.loading ? 'Loading the chain…' : c.demo ? 'Simulated demo prices' : c.strikes ? 'Prices from the CBOE chain (delayed about 15 min)' : 'Model prices (chain not loaded)';
   }
   function renderLegs() {
     const c = app.calc; if (!c) return;
@@ -428,6 +435,8 @@ function initSettings(app) {
     <h3>Push notifications</h3>
     <p class="note">Setup alerts on this device even when INDAI is closed or the screen is locked. The backend watches your TradingView bridge candles and sends your A-plus setups (score 80 and up), following today's plan and the risk breaker.</p>
     <div id="push-status" class="status"></div>
+    <p id="push-receipt" class="note" role="status"></p><p id="push-test-count" class="note" role="status"></p>
+    <p id="profile-sync-status" class="note" role="status"></p>
     <div class="actions" style="margin-top:10px"><button type="button" id="s-push-on" class="btn mini">Turn on push notifications</button><button type="button" id="s-push-test" class="btn mini" hidden>Send a test</button><button type="button" id="s-push-off" class="btn mini" hidden>Turn off</button></div>
 
     <h3>Headset-only</h3>
@@ -505,6 +514,10 @@ function initSettings(app) {
       on: '<span class="ok">On for this device.</span> A-plus setups reach you with INDAI closed. Open INDAI once on a trading day so the backend has today\'s plan.',
     };
     $('push-status').innerHTML = (PUSH[pu.status] || '') + (pu.note && !['backend', 'token'].includes(pu.status) ? `\n${esc(pu.note)}` : '');
+    const receipt = pu.receipt;
+    $('push-receipt').textContent = receipt && Number.isFinite(receipt.seconds) ? `Last alert reached you ${receipt.seconds} s after its candle${receipt.symbol ? ` (${receipt.symbol})` : ''}. Received ${new Date(receipt.receivedAt).toLocaleString()}.` : 'Alert timing appears after the first setup notification reaches this device.';
+    $('push-test-count').textContent = pu.testAccepted == null ? '' : `Last test accepted for ${pu.testAccepted} device${pu.testAccepted === 1 ? '' : 's'}.`;
+    $('profile-sync-status').textContent = [app.drawSync?.state.note ? `Drawings. ${app.drawSync.state.note}` : '', app.tuningSync?.state.note ? `Learning. ${app.tuningSync.state.note}` : ''].filter(Boolean).join(' ');
     $('s-push-on').hidden = !['off', 'backend', 'token', 'blocked'].includes(pu.status); $('s-push-on').disabled = !!pu.busy;
     $('s-push-test').hidden = pu.status !== 'on'; $('s-push-off').hidden = pu.status !== 'on';
     const nb = $('s-notify');

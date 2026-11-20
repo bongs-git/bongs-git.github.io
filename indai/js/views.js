@@ -133,13 +133,11 @@ export function initViews(app) {
       // a failed quote pull is retried within seconds; only say so if it keeps failing
       if (st.mode !== 'demo' && st.cboe === 'err') errSince = errSince || Date.now(); else errSince = 0;
       const stuck = errSince && Date.now() - errSince > 8000;
-      const [label, c] = st.mode === 'demo' ? ['Demo data', 'badge demo'] : stuck ? ['Reconnecting…', 'badge demo'] : bridge ? ['Live · TradingView', 'badge live'] : st.mode === 'live' ? ['Live', 'badge live'] : ['Delayed 15 min', 'badge'];
-      const b = $('t-badge'); setText(b, label); setClass(b, c);
-      b.title = st.mode === 'demo' ? (st.note || 'Simulated prices')
-        : stuck ? `Can't reach market data right now (${navigator.onLine === false ? 'this device is offline' : 'weak connection'}). Retrying every few seconds; prices on screen may be stale.`
-        : bridge ? 'Live candles from your TradingView bridge. Options data from CBOE.'
-        : st.mode === 'live' ? `Real-time prices from Finnhub (${st.finnhubWs === 'live' ? 'streaming' : st.finnhubWs}). Options data from CBOE, about 15 minutes delayed.`
-        : 'Prices are from CBOE, about 15 minutes behind. For live prices, add a free Finnhub key in Settings, or connect the TradingView bridge.';
+      const source = app.marketData.label(app.settings.main);
+      const b = $('t-badge');
+      setText(b, source.text);
+      setClass(b, 'badge' + (st.mode === 'demo' ? ' demo' : source.live ? ' live' : ''));
+      b.title = source.note + (stuck ? ' Reconnecting. Prices may be stale.' : '');
     },
   };
   $('t-badge').addEventListener('click', () => app.toast($('t-badge').title));
@@ -174,8 +172,8 @@ export function initViews(app) {
         setClass(nEl, idea ? (idea.dir > 0 ? 'up' : 'down') : ext ? cls(q.extPct) : near && Math.abs(near.dist) < 0.15 ? 'near' : '');
         setText(row.querySelector('.w-px b'), q ? fmtPrice(q.last) : '—');
         const pEl = row.querySelector('.w-px i');
-        setText(pEl, q ? fmtPct(q.pct) : 'loading');
-        setClass(pEl, q ? cls(q.chg) : 'flat');
+        setText(pEl, q ? app.marketData.changeKnown(sym) ? fmtPct(q.pct) : '—' : 'loading');
+        setClass(pEl, q && app.marketData.changeKnown(sym) ? cls(q.chg) : 'flat');
         const rev = app.feed.syms.get(sym)?.rev, cv = row.querySelector('canvas');
         if (wRev[sym] !== rev + ':' + cv.clientWidth) { wRev[sym] = rev + ':' + cv.clientWidth; drawSparkline(cv, app.feed.getBars(sym, '5min'), q?.base); }
       }
@@ -205,15 +203,18 @@ export function initViews(app) {
       setText($('ch-sym'), sym);
       setText($('ch-last'), q ? fmtPrice(q.last) : '—');
       const chg = $('ch-chg');
-      setText(chg, q ? `${q.chg >= 0 ? '+' : ''}${q.chg.toFixed(2)}  ${fmtPct(q.pct)}` : ' ');
-      setClass(chg, 'mono chg ' + (q ? cls(q.chg) : 'flat'));
+      setText(chg, q && app.marketData.changeKnown(sym) ? `${q.chg >= 0 ? '+' : ''}${q.chg.toFixed(2)}  ${fmtPct(q.pct)}` : '—');
+      setClass(chg, 'mono chg ' + (q && app.marketData.changeKnown(sym) ? cls(q.chg) : 'flat'));
       setText($('ch-hl'), q && q.high != null ? `H ${fmtPrice(q.high)}  L ${fmtPrice(q.low)}${q.ext != null ? `  ext ${fmtPrice(q.ext)}` : ''}` : ' ');
       for (const b of $('ch-tf').children) b.classList.toggle('on', b.dataset.iv === s.interval);
       for (const b of $('ch-show').children) { const on = !!s.show[b.dataset.show]; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
       const note = $('ch-note'), mode = app.feed.status.mode;
-      setText(note, mode === 'demo' ? 'Demo data, not real prices' : mode === 'delayed' && !app.feed.bridgeLive ? 'Delayed about 15 min' : '');
+      setText(note, mode === 'demo' ? 'Demo data, not real prices' : app.marketData.label(sym, 'bars').text);
       setClass(note, 'chart-note' + (mode === 'demo' ? '' : ' quiet'));
       if (tvOn) syncTv(); else chart.draw();
+      const history = app.history?.state(sym), edge = chart.view && chart.view.first <= -(chart.geo?.H || 0) + 1;
+      const historyText = !tvOn && history ? history.busy ? 'Loading earlier candles…' : history.failedAt && edge ? 'Earlier candles could not load. Retrying…' : history.done && edge ? 'That is all INDAI has stored' : '' : '';
+      setText($('ch-history'), historyText); $('ch-history').hidden = !historyText;
     },
   };
   $('ch-prev').addEventListener('click', () => app.cycleSymbol(-1));
@@ -228,21 +229,26 @@ export function initViews(app) {
     $('ch-drawbar').hidden = !st.drawing;
     for (const b of $('ch-tools').children) { const on = b.dataset.tool === st.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
     $('ch-del').disabled = !st.selected;
+    $('ch-undo').disabled = !st.undo;
     $('ch-clear').disabled = !st.count;
     $('ch-reset').hidden = !st.manual;
-    setText($('ch-hint'), st.tool === 'line' ? (st.pending ? 'Now tap where the line ends.' : 'Drag on the chart, or tap where the line starts and then where it ends.')
+    setText($('ch-hint'), st.tool === 'rect' ? (st.pending ? 'Tap the opposite corner.' : 'Drag between opposite corners, or tap each corner. Hold to magnify.')
+      : st.tool === 'line' ? (st.pending ? 'Now tap where the line ends.' : 'Drag on the chart, or tap where the line starts and then where it ends.')
+      : st.tool === 'ray' ? 'Tap the start of a horizontal ray. Hold to magnify.'
       : st.tool === 'level' ? 'Tap the price for the level.'
       : st.selected ? 'Drag it to move it. Drag an end of a line to change it.'
-      : st.count ? 'Tap a line or a level to move or delete it.' : 'Pick Trend line or Level, then draw on the chart.');
+      : st.count ? 'Tap a drawing to move or delete it.' : 'Pick a drawing tool, then draw on the chart.');
   };
   $('ch-draw').addEventListener('click', () => chart.setDrawing(!chart.drawing));
   $('ch-tools').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) chart.setTool(b.dataset.tool); });
+  $('ch-undo').addEventListener('click', () => chart.undo());
   $('ch-del').addEventListener('click', () => chart.deleteSelected());
   $('ch-clear').addEventListener('click', () => chart.clearAll());
   $('ch-reset').addEventListener('click', () => chart.resetView());
   document.addEventListener('keydown', (e) => {
     if (!chart.drawing || e.target.closest('input, textarea, select, [contenteditable]')) return;
-    if ((e.key === 'Delete' || e.key === 'Backspace') && chart.sel) { e.preventDefault(); chart.deleteSelected(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); chart.undo(); }
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && chart.sel) { e.preventDefault(); chart.deleteSelected(); }
     else if (e.key === 'Escape') chart.setDrawing(false);
   });
   $('ch-deep').addEventListener('click', () => app.openDeepDive());
@@ -260,10 +266,28 @@ export function initViews(app) {
     $('tv-out').href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.main)}`;
     if (key === tvKey) return;
     tvKey = key;
-    frame.src = tvOn ? 'https://s.tradingview.com/widgetembed/?' + new URLSearchParams({ frameElementId: 'tv-frame', symbol: s.main, interval: TV_IV[s.interval] || '5',
-      hidesidetoolbar: '0', symboledit: '1', saveimage: '0', toolbarbg: '0a0e14', studies: '[]', theme: 'dark', style: '1', timezone: 'America/New_York', withdateranges: '1', hideideas: '1', locale: 'en' }) : 'about:blank';
+    // Use the vendor-hosted embed directly: its Web Component accesses cookies and cannot run
+    // in an opaque srcdoc sandbox. Vendor scripts remain cross-origin from INDAI and its token.
+    const next = frame.cloneNode(false);
+    next.src = tvOn ? 'https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=en#' + encodeURIComponent(JSON.stringify({
+      symbol: s.main, interval: TV_IV[s.interval] || '5', timezone: 'America/New_York', theme: 'dark', style: '1',
+      allow_symbol_change: true, hide_side_toolbar: false, withdateranges: true, save_image: false,
+      autosize: true, width: '100%', height: '100%', support_host: 'https://www.tradingview.com',
+    })) : 'about:blank';
+    next.setAttribute('sandbox', tvOn ? 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox' : 'allow-scripts');
+    frame.replaceWith(next);
+
   };
   app.showTradingView = (on) => { tvOn = on == null ? !tvOn : !!on; if (tvOn) chart.setDrawing(false); syncTv(); app.markDirty('chart'); };
+  $('tv-full').addEventListener('click', async () => {
+    const host = $('chart-host');
+    if (document.fullscreenElement) { await document.exitFullscreen(); return; }
+    if (host.classList.contains('expanded')) { host.classList.remove('expanded'); setText($('tv-full'), 'Full screen'); return; }
+    try { await host.requestFullscreen(); }
+    catch { host.classList.add('expanded'); }
+    setText($('tv-full'), 'Exit full screen');
+  });
+  document.addEventListener('fullscreenchange', () => setText($('tv-full'), document.fullscreenElement ? 'Exit full screen' : 'Full screen'));
   $('ch-tv').addEventListener('click', () => app.showTradingView());
 
   // ------------------------------------------------------------ GEX levels
@@ -274,7 +298,7 @@ export function initViews(app) {
       setText($('h-lv'), `GEX levels · ${sym}`);
       const rowsEl = $('lv-rows');
       if (!lv) {
-        rowsEl.innerHTML = `<p class="lv-empty">Loading levels for ${esc(sym)}… They come from your morning GEX refresh, or live from the options chain.</p>`;
+        rowsEl.innerHTML = `<p class="lv-empty">${esc(app.marketData.levelNote(sym))}</p>`;
         setText($('lv-regime'), ' '); setText($('lv-src'), ' ');
         return;
       }

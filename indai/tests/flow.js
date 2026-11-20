@@ -1,21 +1,22 @@
-const { chromium } = require('playwright');
+const { quietFixture } = require('./browser.cjs');
+const { chromium } = require('./browser.cjs');
 const OUT = __dirname;
 const only = process.argv[2];
 const sizes = { phone: [390, 844], tablet: [820, 1180], laptop: [1440, 900] };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   let failed = 0;
   for (const [name, [w, h]] of Object.entries(sizes)) {
     if (only && only !== name) continue;
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, hasTouch: name !== 'laptop', isMobile: name === 'phone' });
-    const page = await ctx.newPage();
+    const page = await ctx.newPage(); await quietFixture(page);
     const errs = [];
     page.on('pageerror', e => errs.push('PAGEERROR ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n')));
     page.on('console', m => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource|net::ERR/.test(m.text())) errs.push(m.type() + ' ' + m.text().slice(0, 300)); });
     const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} [${name}] ${label} ${extra}`); };
     const shot = (n) => page.screenshot({ path: `${OUT}/${name}-${n}.png` });
-    await page.goto('http://127.0.0.1:8765/indai/?nosw=1&nocheckin=1', { waitUntil: 'load' });
+    await page.goto((process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/') + '?nosw=1&nocheckin=1', { waitUntil: 'load' });
     await page.waitForFunction(() => window.__indai && window.__indai.app.feed.status.mode === 'demo' && window.__indai.app.feed.quote('IWM'), null, { timeout: 30000 });
     await sleep(800);
     const A = (fn, arg) => page.evaluate(fn, arg);
@@ -76,7 +77,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     check('log a loss', (await A(() => window.__indai.app.day.pnl)) === -40);
     r = await say('what do you remember', /fix(es)? for how you speak/);
     check('what do you remember', /Nothing saved yet|holding/.test(r), JSON.stringify(r.slice(0, 120)));
-    r = await say('remember that I never trade the first five minutes', /couldn't save|remember that/);
+    r = await say('remember that I never trade the first five minutes', /couldn't save that|I'll remember/);
     check('remember that (offline -> graceful)', /couldn't save that|I'll remember/.test(r), JSON.stringify(r.slice(0, 120)));
     r = await say('switch to the loft', /headset/);
     check('scene is headset-only', /headset/i.test(r));

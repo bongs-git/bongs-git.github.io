@@ -1,13 +1,14 @@
+const { quietFixture } = require('./browser.cjs');
 // The thinking budget: what the website does when the backend says today's budget is used up,
 // when she is rate limited, and when web research keeps failing (502) while still being charged.
 const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } = require('./lib.js');
 const TRADE_OK = { result: { rag: 'AMBER', confidence: 64, headline: 'Trend is with you but the call wall is close', spoken: 'With the news in, I rate this AMBER. Momentum is fine, but the call wall caps the upside today.', summary: ['Yields easing helps tech'], bullish: [], bearish: [], news: [], events: [], watch: [] }, sources: [], model: 'mock' };
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const sess = lastSession();
   for (const [name, w, h, mobile] of [['phone', 390, 844, true], ['laptop', 1440, 900, false]]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: mobile, isMobile: mobile });
-    const page = await ctx.newPage(); const errs = [];
+    const page = await ctx.newPage(); await quietFixture(page); const errs = [];
     page.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
     page.on('console', m => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource|net::ERR/.test(m.text())) errs.push(m.type() + ' ' + m.text().slice(0, 240)); });
     const be = { talk: 'budget', trade: 'budget', calls: { talk: 0, trade: 0, mem: 0 } };

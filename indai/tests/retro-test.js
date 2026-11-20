@@ -20,7 +20,7 @@ function seed() {
   return { days, tuning: null, log: [] };
 }
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const sess = lastSession();
   // the mock's session must be a whole, finished day for the after-the-close checks
   const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false, weekday: 'short' }).formatToParts(new Date());
