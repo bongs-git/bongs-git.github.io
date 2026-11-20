@@ -16,7 +16,7 @@ export function initPush(app) {
   let mem = { endpoint: '', syncedAt: 0, day: '' };
   try { Object.assign(mem, JSON.parse(localStorage.getItem(KEY)) || {}); } catch {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch {} };
-  const state = { status: 'checking', note: '', busy: false };
+  const state = { status: 'checking', note: '', busy: false, receipt: null, testAccepted: null };
   const set = (status, note = '') => { state.status = status; state.note = note; app.markDirty('settings'); app.markDirty('more'); };
   const headers = () => ({ Authorization: `Bearer ${RELAY_ANON}`, apikey: RELAY_ANON, 'Content-Type': 'application/json', ...(app.settings.researchPass ? { 'x-indai-pass': app.settings.researchPass } : {}) });
   async function call(body) {
@@ -37,7 +37,16 @@ export function initPush(app) {
     : ['off', `Could not reach the push service (${e.message}).`];
 
   // What is true right now, without changing anything.
+  async function readReceipt() {
+    try {
+      const cache = await caches.open('indai-web-push-receipts-v1');
+      const response = await cache.match(new URL('./push-receipt', document.baseURI));
+      if (response) state.receipt = await response.json();
+      app.markDirty('settings');
+    } catch { /* notification timing is optional when browser storage is restricted */ }
+  }
   async function refresh() {
+    await readReceipt();
     if (!supported()) return set(needsInstall() ? 'install' : 'unsupported');
     if (needsInstall()) return set('install');
     if (Notification.permission === 'denied') return set('blocked');
@@ -82,7 +91,12 @@ export function initPush(app) {
     } finally { state.busy = false; app.markDirty('settings'); }
   }
   async function test() {
-    try { const j = await call({ op: 'test', endpoint: mem.endpoint || undefined }); app.toast(`Test sent to ${j.accepted} device${j.accepted === 1 ? '' : 's'}. It should arrive in a few seconds.`); }
+    try {
+      const j = await call({ op: 'test', endpoint: mem.endpoint || undefined });
+      state.testAccepted = Number.isFinite(j.accepted) ? j.accepted : null;
+      app.markDirty('settings');
+      app.toast(state.testAccepted === null ? 'The test service did not return a device count.' : `Test accepted for ${state.testAccepted} device${state.testAccepted === 1 ? '' : 's'}.`);
+    }
     catch (e) { if (e.code === 'no_subscription' || e.code === 'subscription_expired') { mem.endpoint = ''; save(); set('off', 'This device needs to be registered again.'); } app.toast(e.code === 'rate_limited' ? 'Too many tests in an hour. Try again later.' : `The test did not go out (${e.message}).`); }
   }
 
@@ -112,11 +126,12 @@ export function initPush(app) {
     const d = app.day, sig = [d.pnl, d.tripped, d.cooldownUntil, d.goalHit, d.plan && [d.plan.aggr, d.plan.capital, d.plan.goal, d.plan.strategies], app.settings.symbols, app.settings.levelsText].join('|');
     if (sig !== lastSig) { const first = !lastSig; lastSig = sig; if (!first) syncSoon(); }
   }, 3000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSoon(4000); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { readReceipt(); syncSoon(4000); } });
 
   // a tapped notification brings its ticker up
   if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (ev) => {
     const m = ev.data || {};
+    if (m.type === 'indai-receipt') { readReceipt(); return; }
     if (m.type !== 'indai-open' || app.locked) return;
     if (m.symbol && app.settings.symbols.includes(m.symbol)) app.selectSymbol(m.symbol);
     app.catchUpIdeas?.();

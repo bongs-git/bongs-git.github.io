@@ -19,6 +19,8 @@ import { initLock } from './lock.js';
 import { initPush } from './push.js';
 import { initRetro } from './retro.js';
 import { initHistory } from './history.js';
+import { initDrawingSync } from './draw.js';
+import { initDataStatus } from './data-status.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
@@ -60,7 +62,25 @@ const app = {
 app.levels = parseLevels(app.settings.levelsText);
 app.feed = new MarketFeed(app.settings);
 installRelayGuards(app);
+initDataStatus(app);
 app.indai = new Indai(app);
+// Keep a failed chain request visible even when the shared analysis routine returns early.
+{
+  const analyze = app.indai.analyzeIdea.bind(app.indai);
+  let latest = 0;
+  app.indai.analyzeIdea = async (...args) => {
+    const request = ++latest;
+    app.analysisFailure = null;
+    const result = await analyze(...args);
+    const failure = app.marketData.optionNote(args[0].sym);
+    if (request === latest && failure) {
+      app.analysisFailure = { sym: args[0].sym, message: failure };
+      app.ui.openSheet('analysis');
+      app.markDirty('analysis');
+    }
+    return result;
+  };
+}
 app.saveSettings = () => saveSettings(app.forceDemo ? { ...app.settings, dataMode: app.savedDataMode } : app.settings);   // ?demo=1 is for this visit only
 const say = (...a) => app.indai.say(...a);
 
@@ -574,7 +594,7 @@ app.calcStep = (field, dir) => {
 // Fill entry prices and IVs from the live (delayed) chain.
 app.calcFromChain = async ({ quiet = false } = {}) => {
   const c = app.calc; if (!c) return;
-  c.loading = true; app.markDirty('calc'); app.onCalcChange?.();
+  c.loading = true; c.chainError = ''; app.markDirty('calc'); app.onCalcChange?.();
   const exps = [...new Set(c.legs.map(l => l.expiry))];
   try {
     for (const exp of exps) {
@@ -591,7 +611,7 @@ app.calcFromChain = async ({ quiet = false } = {}) => {
       }
     }
     if (!quiet) say(`Calculator updated from the ${c.sym} chain.`, 'info', { speak: false });
-  } catch (e) { if (!quiet) say(`Couldn't load the ${c.sym} chain: ${e.offline ? "the backend can't be reached" : e.message}`, 'info', { speak: false }); }
+  } catch (e) { c.chainError = app.marketData.optionNote(c.sym); if (!quiet) say(`Couldn't load the ${c.sym} chain: ${e.offline ? "the backend can't be reached" : e.message}`, 'info', { speak: false }); }
   c.loading = false; app.markDirty('calc'); app.onCalcChange?.();
 };
 app.openCalc = () => { app.ensureCalc(); app.ui.openSheet('calc'); };
@@ -1196,6 +1216,7 @@ async function boot() {
   app.ui = initViews(app);
   initSheets(app);
   initRetro(app); initHistory(app);
+initDrawingSync(app);
   initIdeas(app);
   initPush(app);
   // Behind the access lock nothing starts: no prices, no alerts, no voice. Unlocking reloads the page.

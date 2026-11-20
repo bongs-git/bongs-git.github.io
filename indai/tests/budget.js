@@ -3,7 +3,7 @@
 const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } = require('./lib.js');
 const TRADE_OK = { result: { rag: 'AMBER', confidence: 64, headline: 'Trend is with you but the call wall is close', spoken: 'With the news in, I rate this AMBER. Momentum is fine, but the call wall caps the upside today.', summary: ['Yields easing helps tech'], bullish: [], bearish: [], news: [], events: [], watch: [] }, sources: [], model: 'mock' };
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const sess = lastSession();
   for (const [name, w, h, mobile] of [['phone', 390, 844, true], ['laptop', 1440, 900, false]]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: mobile, isMobile: mobile });

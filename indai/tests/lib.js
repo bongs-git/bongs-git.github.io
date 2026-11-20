@@ -1,9 +1,10 @@
 // Runs the website against a mocked INDAI backend that follows the HANDOFF.md contract,
 // to exercise the real-data path and the "thinking brain" path (which the sandbox cannot reach for real).
-const { chromium } = require('playwright');
-const OUT = __dirname, URL = 'http://127.0.0.1:8765/indai/';
+const { chromium } = require('./browser.cjs');
+const OUT = __dirname, URL = process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const state = { failed: 0 };
+process.on('beforeExit', () => { if (state.failed) process.exitCode = 1; });
 const check = (label, ok, extra = '') => { if (!ok) state.failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra}`); };
 const PX = { SPY: 749, QQQ: 662, IWM: 276, TSLA: 387, AMZN: 265, MSFT: 528, VIX: 17.2, NVDA: 156 };
 function etYMD(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(d); }

@@ -1,3 +1,4 @@
+import { profileSync } from './profile-sync.js';
 // Retrospective: after the close, go back over the day's trade ideas, see what won and what lost and why, and
 // let INDAI adjust what she alerts on. Doing this day after day is how the ideas get tighter.
 //
@@ -195,6 +196,15 @@ export function initRetro(app) {
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch {} };
   const tuning = () => st.tuning || NO_TUNING;
   const demo = () => app.feed.status.mode === 'demo';
+  const profile = () => ({ version: 1, ...tuning(), at: st.tuning?.at || st.clearedAt || 0 });
+  const sync = profileSync(app, 'tuning', profile, value => {
+    if (value?.version !== 1 || !Number.isFinite(value.at) || value.at <= profile().at || !value.adj || typeof value.adj !== 'object' || Array.isArray(value.adj)) return;
+    if (![value.minAdd, value.stop, value.target].every(Number.isFinite) || value.minAdd < 0 || value.minAdd > 30 || value.stop <= 0 || value.stop > 3 || value.target <= 0 || value.target > 3) return;
+    if (Object.entries(value.adj).some(([key, points]) => !/^(time|kind|dir|sym|flag):/.test(key) || !Number.isFinite(points) || points < -10 || points > 3)) return;
+    st.tuning = { adj: value.adj, labels: value.labels || {}, minAdd: value.minAdd, stop: value.stop, target: value.target, at: value.at, basis: value.basis };
+    save(); app.markDirty('ideas'); app.markDirty('ideabar');
+  });
+  app.tuningSync = sync;
 
   // Every setup the scanner found today at the plan's level (her own rules, nothing she has learned applied), with its result.
   function buildDay() {
@@ -248,16 +258,16 @@ export function initRetro(app) {
     return { today, days, proposal: propose(days, plan.minScore, tuning()), tuning: tuning(), minScore: plan.minScore, riskPerTrade: plan.riskPerTrade, log: st.log.slice(-6), demo: demo(), at: Date.now() };
   }
   function apply(proposal) {
-    const t = { adj: proposal.adj, labels: proposal.labels, minAdd: proposal.minAdd, stop: proposal.stop, target: proposal.target, at: Date.now(), basis: { ideas: proposal.n, days: proposal.days } };
+    const t = { adj: proposal.adj, labels: proposal.labels, minAdd: proposal.minAdd, stop: proposal.stop, target: proposal.target, at: Math.max(Date.now(), profile().at + 1), basis: { ideas: proposal.n, days: proposal.days } };
     st.tuning = Object.keys(t.adj).length || t.minAdd || t.stop !== 1 || t.target !== 1 ? t : null;
     const text = proposal.why.length ? proposal.why.map(w => w.text).join('; ') : 'back to the scanner as it comes';
     st.log.push({ at: Date.now(), ymd: etParts().ymd, text, ideas: proposal.n, days: proposal.days }); st.log = st.log.slice(-20);
-    save();
+    save(); sync.queue();
     // she keeps the lesson in her long-term memory too, so what she says matches what she alerts on
     if (proposal.why.length && !demo()) relay.brain({ mode: 'memory', op: 'add', kind: 'rule', text: `Retrospective ${etParts().ymd}, from ${proposal.n} trade ideas over ${proposal.days} day${proposal.days === 1 ? '' : 's'}: ${text}.`.slice(0, 480) }, app.settings.researchPass).catch(() => {});
     for (const v of ['ideas', 'ideabar', 'today']) app.markDirty(v);
   }
-  function reset() { st.tuning = null; st.log.push({ at: Date.now(), ymd: etParts().ymd, text: 'everything she learned was cleared', ideas: 0, days: 0 }); save(); for (const v of ['ideas', 'ideabar']) app.markDirty(v); }
+  function reset() { const at = Math.max(Date.now(), profile().at + 1); st.tuning = null; st.clearedAt = at; sync.queue(); st.log.push({ at: Date.now(), ymd: etParts().ymd, text: 'everything she learned was cleared', ideas: 0, days: 0 }); save(); for (const v of ['ideas', 'ideabar']) app.markDirty(v); }
   // Used by the scan on every fresh setup.
   app.tune = (c, at) => (st.tuning && !demo() ? tuneIdea(c, st.tuning, at) : c);
   app.retro = { buildDay, bank, review, apply, reset, tuning, history, banked: (ymd) => !!st.days[ymd] };

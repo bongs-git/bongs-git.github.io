@@ -1,5 +1,5 @@
-const { chromium, devices } = require('playwright');
-const OUT = __dirname, URL = 'http://127.0.0.1:8765/indai/';
+const { chromium, devices } = require('./browser.cjs');
+const OUT = __dirname, URL = process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failed = 0;
 const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra}`); };

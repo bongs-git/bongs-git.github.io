@@ -2,7 +2,7 @@
 // with an owner passcode set, the brain (and push) refuse anyone without the x-indai-pass header.
 const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } = require('./lib.js');
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const sess = lastSession();
   const be = { required: true, token: 'open sesame 42', vapid: false, calls: { market: 0, talk: 0, mem: 0, profile: [], push: [] }, subs: [] };
   const brain = async (req, json) => {

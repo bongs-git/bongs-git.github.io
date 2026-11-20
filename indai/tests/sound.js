@@ -1,7 +1,7 @@
 // Being heard on an iPhone: audio session switching around the microphone, letting go of the mic when listening ends,
 // waking the audio engine, the slow-natural-voice fallback, and the sound line in Settings.
-const { chromium } = require('playwright');
-const URL = 'http://127.0.0.1:8765/indai/', OUT = __dirname;
+const { chromium } = require('./browser.cjs');
+const URL = process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/', OUT = __dirname;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failed = 0;
 const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra}`); };

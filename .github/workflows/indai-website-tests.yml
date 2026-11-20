@@ -1,0 +1,50 @@
+name: INDAI website tests
+on:
+  pull_request:
+    paths: ['indai/**', '.github/workflows/indai-website-tests.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [core, features, guardrails]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix indai/tests --no-save playwright@1.62.1
+      - run: cd indai/tests && npx playwright install --with-deps chromium
+      - name: Run website checks
+        shell: bash
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 > /tmp/server.log 2>&1 &
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8765/indai/ >/dev/null && break || sleep 1; done
+          case "$GROUP" in
+            core) tests='flow.js mock.js extra.js bottom.js smoke.js' ;;
+            features) tests='chart-test.js ideas-test.js retro-test.js final-touches.js' ;;
+            guardrails) tests='lock-test.js budget.js sound.js swpush.js resume.js retro-unit.mjs pine-ref.mjs final-unit.mjs' ;;
+          esac
+          mkdir -p /tmp/indai-results
+          failed=0
+          for test in $tests; do
+            log="/tmp/indai-results/$test.log"
+            timeout 180 node "indai/tests/$test" > "$log" 2>&1 || failed=1
+            cat "$log"
+            if grep -Eq '(^FAIL|SCRIPT ERROR|[0-9]+ FAILED)' "$log"; then failed=1; fi
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: website-${{ matrix.group }}
+          path: |
+            /tmp/indai-results/
+            indai/tests/*.png

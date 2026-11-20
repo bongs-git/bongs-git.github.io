@@ -32,7 +32,7 @@ export function initHistory(app) {
   async function more(sym) {
     const e = entry(sym);
     if (e.busy || e.done) return;
-    e.busy = true;
+    e.busy = true; app.markDirty('chart');
     try {
       let rows, last;
       if (app.feed.status.mode === 'demo') { rows = demoRows(sym, e); last = !rows.length || e.bars.length + rows.length >= DEMO_DAYS * 390; }
@@ -44,10 +44,10 @@ export function initHistory(app) {
       }
       const add = rows.map(b => ({ t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v || 0 }))
         .filter(b => b.t % 60e3 === 0 && b.c > 0 && b.o > 0 && regular(b.t) && (!e.bars.length || b.t < e.bars[0].t)).sort((a, b) => a.t - b.t);
-      e.bars = [...add, ...e.bars]; e.done = last; e.cache = {};
+      e.bars = [...add, ...e.bars]; e.done = last; e.failedAt = 0; e.cache = {};
       if (add.length) app.markDirty('chart');
     } catch { e.failedAt = Date.now(); }
-    e.busy = false;
+    e.busy = false; app.markDirty('chart');
   }
 
   app.history = {
@@ -71,6 +71,6 @@ export function initHistory(app) {
     },
     // Asks for the next older page unless one is on its way, there is no more, or the last try just failed.
     want(sym) { const e = entry(sym); if (!e.busy && !e.done && Date.now() - e.failedAt > 30e3) more(sym); },
-    state(sym) { const e = entry(sym); return { candles: e.bars.length, done: e.done, busy: e.busy }; },
+    state(sym) { const e = entry(sym); return { candles: e.bars.length, done: e.done, busy: e.busy, failedAt: e.failedAt }; },
   };
 }

@@ -1,7 +1,7 @@
 // Real-data mode on a phone: dropped requests must not block the next ones, prices refresh on resume,
 // and the morning chart fills the screen with labels that don't overlap.
-const { chromium } = require('playwright');
-const OUT = __dirname, URL = 'http://127.0.0.1:8765/indai/';
+const { chromium } = require('./browser.cjs');
+const OUT = __dirname, URL = process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failed = 0;
 const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra}`); };
@@ -12,7 +12,7 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
   for (let i = 0; i < n; i++) { const o = p; p = p * (1 + rnd() * 0.0012 - (sym === 'QQQ' && i > 25 && i < 70 ? 0.00045 : 0)); out.push([571 + i, +o.toFixed(2), +(Math.max(o, p) * 1.0004).toFixed(2), +(Math.min(o, p) * 0.9996).toFixed(2), +p.toFixed(2), 30000]); }
   return out; }
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const n = minutesSoFar(); console.log('   minutes of session in the mock:', n);
   if (n < 20) { console.log('   (market not open long enough right now for the morning-chart check; skipping)'); process.exit(0); }
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });

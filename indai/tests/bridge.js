@@ -1,6 +1,6 @@
 // Once the TradingView bridge alert is running, the website must switch to live candles by itself.
-const { chromium } = require('playwright');
-const OUT = __dirname, URL = 'http://127.0.0.1:8765/indai/';
+const { chromium } = require('./browser.cjs');
+const OUT = __dirname, URL = process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failed = 0; const check = (l, ok, x = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${l} ${x}`); };
 const PX = { SPY: 749, QQQ: 662, IWM: 276, TSLA: 387, AMZN: 265, MSFT: 528 };
@@ -9,7 +9,7 @@ function mins() { const p = new Intl.DateTimeFormat('en-US', { timeZone: 'Americ
 function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7 + 3; const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647 - 0.5; }; for (let i = 0; i < n; i++) { const o = p; p = p * (1 + rnd() * 0.001); out.push([571 + i, +o.toFixed(2), +(Math.max(o, p) * 1.0003).toFixed(2), +(Math.min(o, p) * 0.9997).toFixed(2), +p.toFixed(2), 30000]); } return out; }
 (async () => {
   const m = mins(); if (m < 30 || m > 385) { console.log('   (outside regular hours: skipping the live-bridge check)'); process.exit(0); }
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true })).newPage();
   const errs = []; page.on('pageerror', e => errs.push(e.message));
   let bridgeOn = false; const delayed = m - 15;

@@ -1,10 +1,10 @@
-const { chromium } = require('playwright');
+const { chromium } = require('./browser.cjs');
 const OUT = __dirname;
 const only = process.argv[2];
 const sizes = { phone: [390, 844], tablet: [820, 1180], laptop: [1440, 900] };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   let failed = 0;
   for (const [name, [w, h]] of Object.entries(sizes)) {
     if (only && only !== name) continue;
@@ -15,7 +15,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     page.on('console', m => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource|net::ERR/.test(m.text())) errs.push(m.type() + ' ' + m.text().slice(0, 300)); });
     const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} [${name}] ${label} ${extra}`); };
     const shot = (n) => page.screenshot({ path: `${OUT}/${name}-${n}.png` });
-    await page.goto('http://127.0.0.1:8765/indai/?nosw=1&nocheckin=1', { waitUntil: 'load' });
+    await page.goto((process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/') + '?nosw=1&nocheckin=1', { waitUntil: 'load' });
     await page.waitForFunction(() => window.__indai && window.__indai.app.feed.status.mode === 'demo' && window.__indai.app.feed.quote('IWM'), null, { timeout: 30000 });
     await sleep(800);
     const A = (fn, arg) => page.evaluate(fn, arg);

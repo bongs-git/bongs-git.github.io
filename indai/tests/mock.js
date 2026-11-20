@@ -1,7 +1,7 @@
 // Runs the website against a mocked INDAI backend that follows the HANDOFF.md contract,
 // to exercise the real-data path and the "thinking brain" path (which the sandbox cannot reach for real).
-const { chromium } = require('playwright');
-const OUT = __dirname, URL = 'http://127.0.0.1:8765/indai/';
+const { chromium } = require('./browser.cjs');
+const OUT = __dirname, URL = process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failed = 0;
 const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra}`); };
@@ -34,7 +34,7 @@ function chain(sym, spot, wantExp) {
     unusual: [{ exp: expiry, type: 'C', strike: Math.round(spot) + 3, vol: 21000, oi: 9000, mid: 0.84, premium: 1764000, iv: 0.2 }], chain: rows, today };
 }
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   const sess = lastSession(); const memory = [{ id: 1, kind: 'taught', text: 'I never trade the first five minutes', created_at: new Date().toISOString() }];
   const calls = { talk: 0, trade: 0, mem: [] };
   for (const [name, w, h, mobile] of [['laptop', 1440, 900, false], ['phone', 390, 844, true]]) {

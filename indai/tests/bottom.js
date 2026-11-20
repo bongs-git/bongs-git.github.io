@@ -1,11 +1,11 @@
-const { chromium } = require('playwright');
+const { chromium } = require('./browser.cjs');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
-  const browser = await chromium.launch(); let bad = 0;
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined }); let bad = 0;
   for (const [name, w, h, mobile] of [['laptop', 1440, 900, false], ['tablet', 820, 1180, true], ['phone', 390, 844, true]]) {
     const page = await (await browser.newContext({ viewport: { width: w, height: h }, hasTouch: mobile, isMobile: name === 'phone' })).newPage();
     const errs = []; page.on('pageerror', e => errs.push(e.message));
-    await page.goto('http://127.0.0.1:8765/indai/?nosw=1&demo=1&nocheckin=1');
+    await page.goto((process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/') + '?nosw=1&demo=1&nocheckin=1');
     await page.waitForFunction(() => window.__indai && window.__indai.app.feed.quote('IWM'));
     if (name === 'phone') await page.click('#tabs [data-tab="indai"]');
     const gap = () => page.evaluate(() => { const l = document.getElementById('i-log'); return Math.round(l.scrollHeight - l.scrollTop - l.clientHeight); });

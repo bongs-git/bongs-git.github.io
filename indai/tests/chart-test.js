@@ -1,6 +1,6 @@
 // Moving, zooming and drawing on the main chart, with a mouse (laptop) and with touch (phone).
-const { chromium } = require('playwright');
-const URL = 'http://127.0.0.1:8765/indai/?demo=1';
+const { chromium } = require('./browser.cjs');
+const URL = (process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/') + '?demo=1';
 let failed = 0;
 const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra === '' ? '' : JSON.stringify(extra)}`); };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -10,7 +10,7 @@ const yOf = (p, price) => p.evaluate((v) => { const c = window.__indai.app.chart
 const ready = async (p) => { await p.waitForFunction(() => window.__indai && window.__indai.app.chart && window.__indai.app.chart.geo, null, { timeout: 30000 }); await sleep(600); };
 
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
   // ---------------------------------------------------------------- laptop, mouse
   {
     const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
@@ -58,14 +58,14 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     check('[laptop] Reset view undoes both scales', !(await st(p)).manual);
     // TradingView in the panel
     await p.click('#ch-tv'); await sleep(300);
-    const tv1 = await p.evaluate(() => ({ shown: !document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('src'), label: document.getElementById('ch-tv-label').textContent, drawOff: document.getElementById('ch-draw').disabled, sym: window.__indai.app.settings.main, iv: window.__indai.app.settings.interval, out: document.getElementById('tv-out').href }));
-    check('[laptop] TradingView chart shows their chart for this ticker and candle size in the panel', tv1.shown && tv1.src.startsWith('https://s.tradingview.com/widgetembed/?') && tv1.src.includes('symbol=' + tv1.sym) && tv1.src.includes('interval=' + parseInt(tv1.iv)) && tv1.src.includes('theme=dark') && tv1.drawOff && tv1.label === 'INDAI chart' && tv1.out.includes(tv1.sym), { src: tv1.src.slice(0, 90) });
+    const tv1 = await p.evaluate(() => ({ shown: !document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('srcdoc'), label: document.getElementById('ch-tv-label').textContent, drawOff: document.getElementById('ch-draw').disabled, sym: window.__indai.app.settings.main, iv: window.__indai.app.settings.interval, out: document.getElementById('tv-out').href }));
+    check('[laptop] TradingView chart shows their chart for this ticker and candle size in the panel', tv1.shown && tv1.src.includes('tv-advanced-chart') && tv1.src.includes('symbol="' + tv1.sym + '"') && tv1.src.includes('interval="' + parseInt(tv1.iv) + '"') && tv1.src.includes('theme="dark"') && tv1.drawOff && tv1.label === 'INDAI chart' && tv1.out.includes(tv1.sym), { src: tv1.src.slice(0, 90) });
     await p.click('#ch-next'); await sleep(500);
-    const tv2 = await p.evaluate(() => ({ src: document.getElementById('tv-frame').getAttribute('src'), sym: window.__indai.app.settings.main }));
-    check('[laptop] it follows the ticker', tv2.src.includes('symbol=' + tv2.sym) && tv2.sym !== tv1.sym);
+    const tv2 = await p.evaluate(() => ({ src: document.getElementById('tv-frame').getAttribute('srcdoc'), sym: window.__indai.app.settings.main }));
+    check('[laptop] it follows the ticker', tv2.src.includes('symbol="' + tv2.sym + '"') && tv2.sym !== tv1.sym);
     await p.click('#ch-prev'); await p.click('#ch-tv'); await sleep(400);
-    const tv3 = await p.evaluate(() => ({ hidden: document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('src'), drawOff: document.getElementById('ch-draw').disabled, geo: !!window.__indai.app.chart.geo }));
-    check('[laptop] INDAI chart brings the own chart back and unloads the frame', tv3.hidden && tv3.src === 'about:blank' && !tv3.drawOff && tv3.geo);
+    const tv3 = await p.evaluate(() => ({ hidden: document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('srcdoc'), drawOff: document.getElementById('ch-draw').disabled, geo: !!window.__indai.app.chart.geo }));
+    check('[laptop] INDAI chart brings the own chart back and unloads the frame', tv3.hidden && tv3.src === '' && !tv3.drawOff && tv3.geo);
     // drawing a trend line by dragging
     await p.click('#ch-draw'); await p.click('#ch-tools [data-tool="line"]');
     const s5 = await st(p);
