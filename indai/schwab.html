@@ -25,7 +25,7 @@
   input { width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: inherit; padding: 10px 12px; margin-bottom: 10px; }
   #state { font-weight: 600; }
   #state.ok { color: var(--up); } #state.bad { color: var(--down); }
-  #out { min-height: 1.5em; } #out.ok { color: var(--up); } #out.bad, #check.bad { color: var(--down); }
+  #out { min-height: 1.5em; } #out.ok, #liveout.ok { color: var(--up); } #out.bad, #check.bad, #liveout.bad { color: var(--down); }
   .quiet { background: none; border: 0; color: var(--dim); font-weight: 400; text-decoration: underline; min-height: 44px; width: auto; padding: 8px 0; }
   [hidden] { display: none !important; }
 </style>
@@ -46,6 +46,14 @@
     <p class="dim" id="detail"></p>
     <p class="dim" id="check" hidden></p>
     <button id="off" class="quiet" hidden>Disconnect Schwab</button>
+  </div>
+
+  <div class="card" id="livecard" hidden>
+    <div class="step"><span>Live prices</span></div>
+    <p class="dim">Opens Schwab's live price stream on this device for 20 seconds, to check that SPY and QQQ arrive tick by tick.</p>
+    <button id="livego">Test live stream</button>
+    <p id="liveout" role="status" style="margin:12px 0 0"></p>
+    <p class="dim" id="livelog" style="margin:6px 0 0;overflow-wrap:anywhere" hidden></p>
   </div>
 
   <div id="steps" hidden>
@@ -88,7 +96,7 @@ function show(s) {
   if (!s.configured) {
     say($('state'), 'Schwab is not set up yet.', 'bad');
     $('detail').textContent = 'Add SCHWAB_APP_KEY and SCHWAB_APP_SECRET to the Supabase secrets, then open this page again.';
-    $('steps').hidden = true; $('off').hidden = true; return;
+    $('steps').hidden = true; $('off').hidden = true; $('livecard').hidden = true; return;
   }
   if (s.connected) {
     say($('state'), 'Connected.', 'ok');
@@ -97,7 +105,7 @@ function show(s) {
     say($('state'), 'Not connected.', 'bad');
     $('detail').textContent = 'Two steps, about a minute. Schwab asks for this again every seven days.';
   }
-  $('off').hidden = !s.connected; $('steps').hidden = false;
+  $('off').hidden = !s.connected; $('steps').hidden = false; $('livecard').hidden = !s.connected;
 }
 async function load() {
   if (!pass) { $('passcard').hidden = false; say($('state'), 'Enter your passcode to begin.'); return; }
@@ -143,6 +151,43 @@ $('paste').onclick = async () => {
 };
 $('connect').onclick = () => finish($('url').value);
 $('url').onkeydown = (e) => { if (e.key === 'Enter') finish($('url').value); };
+// Twenty seconds of Schwab's live stream, opened by this browser the way the charts open it (js/schwab-stream.js).
+// The page shows what happened in plain words, and the steps it went through, so a failure can be read off the screen.
+const LIVE_MS = 20000;
+$('livego').onclick = async () => {
+  $('livego').disabled = true; say($('liveout'), 'Connecting…'); $('livelog').hidden = true;
+  const seen = { updates: 0, moves: 0, last: {}, steps: [], live: false, stop: '' };
+  const prices = () => ['SPY', 'QQQ'].filter((k) => seen.last[k] != null).map((k) => `${k} ${Number(seen.last[k]).toFixed(2)}`).join(', ');
+  let stream = null, over = false;
+  try {
+    const { schwabStream } = await import('./js/schwab-stream.js');
+    stream = schwabStream({
+      info: () => ask({ op: 'stream' }), symbols: () => ['SPY', 'QQQ'],
+      onQuote: (q) => { seen.updates++; if (seen.last[q.symbol] != null) seen.moves++; seen.last[q.symbol] = q.last; },
+      onState: (s) => {
+        if (over) return;
+        const step = s.state + (s.detail ? ': ' + s.detail : '');
+        if (seen.steps.at(-1) !== step) seen.steps.push(step);
+        if (s.state === 'live') seen.live = true;
+        else if (s.state !== 'connecting' && s.state !== 'waiting') seen.stop = seen.stop || s.detail || s.state;   // off, refused, elsewhere: nothing more will come
+      },
+    });
+    const from = Date.now(); stream.start();
+    await new Promise((done) => { const t = setInterval(() => {
+      const left = Math.ceil((LIVE_MS - (Date.now() - from)) / 1000);
+      if (left <= 0 || (seen.stop && !seen.live)) { clearInterval(t); done(); return; }
+      say($('liveout'), seen.live ? `Stream open. ${seen.updates} price updates so far${prices() ? ': ' + prices() : ''}. ${left} s left.` : `Connecting… ${left} s left.`);
+    }, 250); });
+  } catch (e) { seen.stop = seen.stop || e.message || 'the stream could not be started'; }
+  over = true; if (stream) stream.stop();
+  const steps = seen.steps;
+  if (seen.live && seen.moves > 0) say($('liveout'), `Live. ${seen.updates} price updates in ${LIVE_MS / 1000} seconds: ${prices()}.`, 'ok');
+  else if (seen.live && seen.updates > 0) say($('liveout'), `The stream is open and Schwab sent ${prices()}, but nothing moved in ${LIVE_MS / 1000} seconds. That is normal when the market is closed.`, 'ok');
+  else if (seen.live) say($('liveout'), 'Schwab accepted the stream but sent no prices.', 'bad');
+  else say($('liveout'), `The live stream did not open: ${seen.stop || (steps.filter((x) => x !== 'connecting').at(-1) || 'no answer from Schwab').replace(/^\w+: /, '')}`.replace(/\.?$/, '.'), 'bad');
+  $('livelog').hidden = !steps.length || (seen.live && seen.updates > 0); $('livelog').textContent = 'Steps: ' + steps.slice(-8).join(' → ');
+  $('livego').disabled = false;
+};
 $('off').onclick = async () => { try { show(await ask({ op: 'disconnect' })); say($('out'), 'Disconnected. INDAI has forgotten the Schwab sign-in.'); } catch (e) { say($('out'), e.message, 'bad'); } };
 load();
 </script>

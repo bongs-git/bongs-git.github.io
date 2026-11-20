@@ -9,7 +9,7 @@ const VOICE = 'indai-web-voice-17629cb';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './css/app.css',
   './js/app.js', './js/views.js', './js/sheets.js', './js/chart.js', './js/draw.js', './js/history.js', './js/data-status.js', './js/profile-sync.js', './js/demo.js', './js/ideas.js', './js/lock.js', './js/push.js', './js/retro.js', './js/hud.js', './js/panels.js',
   './js/feeds.js', './js/market.js', './js/store.js', './js/indai.js', './js/voice.js', './js/relay.js', './js/options.js', './js/analysis.js', './js/speech.js', './js/signals.js',
-  './js/ext.js', './js/owner-feed.js', './js/timeframes.js', './js/daily.js', './js/candle-store.js', './js/patterns.js', './js/capture.js', './fonts/geist.woff2', './fonts/geist-mono.woff2', './brand/indai-logo.png', './icons/icon-192.png', './icons/icon-512.png'];
+  './js/ext.js', './js/owner-feed.js', './js/schwab-stream.js', './js/timeframes.js', './js/daily.js', './js/candle-store.js', './js/patterns.js', './js/capture.js', './fonts/geist.woff2', './fonts/geist-mono.woff2', './brand/indai-logo.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('indai-web-') && k !== CACHE && k !== VOICE && k !== RECEIPTS).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 // Cross-origin isolation: with these headers the browser lets the voice models run on several CPU cores

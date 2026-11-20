@@ -12,6 +12,8 @@ node capture-test.js      # candle sizes 1m to weekly, Analyze / Capture and its
 node patterns-unit.mjs    # the Capture reading's detectors against TA-Lib 0.8.3 (talib-fixture.json), proxies, anchored candles
 node ext-test.js          # pre-market and after-hours candles and the price line (sets its own clock: same result at any hour)
 node schwab-test.js       # the Connect Schwab page, and the owner's passcode on price requests (stand-in back end)
+node stream-unit.mjs      # Schwab's live stream client against a stand-in socket and clock (no browser)
+node stream-test.js       # "Test live stream" on the Connect page, and stream ticks moving the app's price and candle
 node flow.js              # the whole app in demo mode, phone and laptop
 node mock.js              # against a stand-in backend that follows HANDOFF.md (lib.js is that stand-in)
 node ideas-test.js        # ideas strip, list, alerts, catch-up (its catch-up checks need a session that has started today)
