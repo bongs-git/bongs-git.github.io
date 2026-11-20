@@ -57,6 +57,13 @@ export function initCapture(app) {
   }
 
   // ------------------------------------------------------------ the server's part
+  // The conversation brain answers in a few hundred words at most and reads 12,000 characters of context, so it gets
+  // the newest patterns and the facts that matter for the paths, not the whole reading.
+  function brief(sm) {
+    const { commonCandles, ...rest } = sm;
+    return { ...rest, patterns: sm.patterns.slice(-8).map(({ code, alsoFired, ...p }) => p), patternsInBox: sm.patterns.length, watch: (sm.watch || []).slice(0, 4) };
+  }
+
   async function ask(c) {
     const summary = summarize(c.r), pass = app.settings.researchPass;
     let status = null;
@@ -75,14 +82,17 @@ export function initCapture(app) {
       return;
     }
     const question = `Read my chart capture: ${c.shot.sym} on the ${TF_WORDS[c.shot.tf]} chart, ${c.r.count} candles from ${timeOf(c.r.t0, c.shot.tf)} to ${timeOf(c.r.t1, c.shot.tf)}. `
-      + 'Tell me what it shows, the bull and bear paths with their levels, and what to watch next. Use only the facts in context; do not invent probabilities.';
+      + 'In three or four short spoken sentences: what it shows, the bull and bear triggers with their levels, and what to watch next. '
+      + 'Summary: at most four short lines. Use only the facts in context; do not invent probabilities.';
     try {
       let res;
       if (modes.includes('capture')) res = await relay.brain({ mode: 'capture', name: app.settings.name, symbol: c.shot.sym, timeframe: c.shot.tf, image: c.shot.image, capture: summary, question }, pass);
-      else res = await relay.brain({ mode: 'talk', name: app.settings.name, question, history: [], search: false, session: 'capture', context: { capture: summary, note: 'Computed on the device from the candles inside the box. The atlas numbers are not attached here.' } }, pass);
+      else res = await relay.brain({ mode: 'talk', name: app.settings.name, question, history: [], search: false, session: 'capture', context: { capture: brief(summary), note: 'Computed on the device from the candles inside the box. The atlas numbers are not attached here.' } }, pass);
       const out = res && res.result ? res.result : {};
       c.read = { spoken: out.spoken || out.headline || '', summary: Array.isArray(out.summary) ? out.summary.slice(0, 6) : [], by: modes.includes('capture') ? 'picture' : 'facts' };
-      c.status.read = 'done';
+      // an answer cut off at the brain's length limit comes back empty
+      if (!c.read.spoken) { c.status.read = 'failed'; c.readError = 'It was cut off before it finished.'; c.read = null; }
+      else c.status.read = 'done';
     } catch (e) {
       c.status.read = 'failed'; c.readError = e.code === 'budget' ? "INDAI's daily thinking budget is used up." : e.code === 'rate_limited' ? 'Too many requests this hour; try again shortly.' : '';
     }
@@ -146,7 +156,7 @@ export function initCapture(app) {
     const read = c.status.read === 'done' && c.read ? `<p class="headline">${esc(c.read.spoken)}</p>${c.read.summary.length ? `<ul class="bul">${c.read.summary.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}<p class="note">${c.read.by === 'picture' ? 'INDAI read the picture and the facts above.' : 'INDAI wrote this from the facts above.'}</p><button type="button" class="btn mini" id="cap-say">Read it to me</button>`
       : c.status.read === 'working' ? '<p class="note">INDAI is reading it…</p>'
       : c.status.read === 'off' ? '<p class="note">INDAI\'s thinking brain is off, so this is the on-device reading only.</p>'
-      : `<p class="note">INDAI's read did not come back. ${esc(c.readError || '')}</p>`;
+      : `<p class="note">INDAI's read did not come back. ${esc(c.readError || '')}</p><button type="button" class="btn mini" id="cap-retry">Try again</button>`;
     body.innerHTML = `
       ${c.shot.image ? `<img class="cap-shot" src="${c.shot.image}" alt="The captured part of the ${esc(c.shot.sym)} chart">` : ''}
       <div class="cap-head"><span class="cap-lean ${leanCls}">${esc(lean)}</span><span class="cap-meta">${r.count} candles · ${esc(timeOf(r.t0, r.tf))} → ${esc(timeOf(r.t1, r.tf))}</span></div>
@@ -197,6 +207,7 @@ export function initCapture(app) {
     const tf = e.target.closest('[data-cap-tf]'); if (tf) { onTimeframe(tf.dataset.capTf); return; }
     const old = e.target.closest('[data-cap-id]'); if (old) { reopen(+old.dataset.capId); return; }
     if (e.target.closest('#cap-say') && cur && cur.read) app.indai.say(cur.read.spoken, 'info', { log: false });
+    if (e.target.closest('#cap-retry') && cur && cur.status.read === 'failed') { const c = cur; c.status.read = 'working'; c.readError = ''; app.markDirty('capture'); ask(c); }
   });
   app.chart.onCapture = (shot) => run(shot);
   app.capture = { run, open: () => { app.ui.openSheet('capture'); app.markDirty('capture'); }, current: () => cur, tfMs: TF_MS };
