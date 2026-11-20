@@ -6,8 +6,15 @@ import { LEADLAG } from './feeds.js';
 import { positionPnl, expiryCloseMs } from './options.js';
 import { C, F, fmtPrice, fmtPct, fmtVol, fmtMoney, hexA, colorFor } from './hud.js';
 import { levelSourceLabel } from './panels.js';
+import { drawingsFor, addDrawing, removeDrawing, clearDrawings, saveDrawings, distToSegment } from './draw.js';
 
 const DPR = () => Math.min(3, window.devicePixelRatio || 1);
+const MIN_SLOTS = 8;
+// Between the chart's pixels and its time and price, for the view in `g` (the geometry of the last draw).
+const xOf = (g, t) => g.plot.x + ((t - g.open) / g.ivMs - g.first + 0.5) * g.cw;
+const tOf = (g, x) => g.open + ((x - g.plot.x) / g.cw + g.first - 0.5) * g.ivMs;
+const pOf = (g, y) => g.lo + ((g.plot.y + g.plot.h - Math.max(g.plot.y, Math.min(g.plot.y + g.plot.h, y))) / g.plot.h) * (g.hi - g.lo);
+const inPlot = (g, p) => p.x >= g.plot.x && p.x <= g.plot.x + g.plot.w && p.y >= g.plot.y && p.y <= g.plot.y + g.plot.h;
 
 // Size a canvas to its CSS box. Returns the 2D context (already scaled) and the size in CSS px.
 export function fit(canvas) {
@@ -39,14 +46,209 @@ export class PriceChart {
     this.host = host; this.app = app;
     this.base = host.querySelector('canvas.base'); this.over = host.querySelector('canvas.over');
     this.geo = null; this.hover = null;
+    // Moving and zooming: null follows the session by itself, otherwise the stretch of candles the trader chose.
+    this.view = null; this.viewKey = '';
+    // Drawing: whether the drawing bar is open, the tool in hand, the selected drawing, the gesture in progress,
+    // and the first point of a line that is being placed with two taps.
+    this.drawing = false; this.tool = 'move'; this.sel = null; this.drag = null; this.pending = null;
+    this.ptrs = new Map(); this.raf = 0; this.lastTap = null; this.swallow = false; this.hoverTimer = 0; this.onUi = null;
     new ResizeObserver(() => { app.markDirty('chart'); }).observe(host);
+    this.bind();
+  }
+
+  // ---- pointer, touch and wheel
+  bind() {
+    const host = this.host;
     const pos = (ev) => { const r = host.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
-    host.addEventListener('pointermove', (ev) => { this.hover = pos(ev); this.drawOver(); });
-    host.addEventListener('pointerdown', (ev) => { this.hover = pos(ev); this.drawOver(); });
-    const clear = () => { this.hover = null; this.drawOver(); };
-    host.addEventListener('pointerleave', clear);
-    host.addEventListener('pointercancel', clear);
-    host.addEventListener('pointerup', (ev) => { if (ev.pointerType !== 'mouse') setTimeout(clear, 1600); });
+    host.addEventListener('pointerdown', (ev) => {
+      if ((ev.pointerType === 'mouse' && ev.button !== 0) || ev.target.closest('button')) return;
+      const p = pos(ev);
+      clearTimeout(this.hoverTimer);
+      this.ptrs.set(ev.pointerId, p);
+      this.hover = p;
+      if (!this.geo) { this.drawOver(); return; }
+      try { host.setPointerCapture(ev.pointerId); } catch { /* the pointer is already gone */ }
+      if (this.ptrs.size === 2) this.startPinch();
+      else if (this.ptrs.size === 1) this.down(p, ev.pointerType !== 'mouse');
+    });
+    host.addEventListener('pointermove', (ev) => {
+      const p = pos(ev);
+      if (this.ptrs.has(ev.pointerId)) this.ptrs.set(ev.pointerId, p);
+      if (this.drag && this.drag.kind === 'pinch') { this.pinch(); return; }
+      this.hover = p;
+      if (this.drag) this.move(p);
+      else {
+        if (ev.pointerType === 'mouse') host.style.cursor = this.tool === 'move' && this.hit(p, false) ? 'pointer' : '';
+        this.drawOver();
+      }
+    });
+    const end = (ev, cancelled) => {
+      if (!this.ptrs.delete(ev.pointerId)) return;
+      const p = pos(ev);
+      if (this.drag && this.drag.kind === 'pinch') { this.drag = null; this.hover = null; this.drawOver(); }
+      else if (this.swallow) { /* the finger left over from a pinch does nothing */ }
+      else this.up(p, cancelled);
+      if (!this.ptrs.size) this.swallow = false;
+      if (ev.pointerType !== 'mouse' || cancelled) {
+        clearTimeout(this.hoverTimer);
+        this.hoverTimer = setTimeout(() => { if (!this.ptrs.size) { this.hover = null; this.drawOver(); } }, cancelled ? 0 : 1600);
+      }
+    };
+    host.addEventListener('pointerup', (ev) => end(ev, false));
+    host.addEventListener('pointercancel', (ev) => end(ev, true));
+    host.addEventListener('pointerleave', () => { if (!this.ptrs.size) { this.hover = null; this.drawOver(); } });
+    // Wheel: zooms where the page itself cannot scroll, and always with a trackpad pinch (which arrives as ctrl + wheel).
+    // A sideways swipe moves the chart. Where the page scrolls, a plain up or down wheel is left to the page.
+    host.addEventListener('wheel', (ev) => {
+      const g = this.geo;
+      if (!g) return;
+      const x = ev.clientX - host.getBoundingClientRect().left;
+      if (x < g.plot.x || x > g.plot.x + g.plot.w) return;
+      const unit = ev.deltaMode === 1 ? 33 : 1, dx = ev.deltaX * unit, dy = ev.deltaY * unit;
+      const pinch = ev.ctrlKey || ev.metaKey, fixed = document.documentElement.scrollHeight <= window.innerHeight + 1;
+      if (!pinch && Math.abs(dx) > Math.abs(dy)) { ev.preventDefault(); this.setView(g.first + dx / g.cw, g.slots); return; }
+      if (!pinch && !fixed) return;
+      ev.preventDefault();
+      const slots = this.clampSlots(g.slots * Math.exp(Math.max(-300, Math.min(300, dy)) * (pinch ? 0.01 : 0.0015)));
+      const under = g.first + (x - g.plot.x) / g.cw;
+      this.setView(under - (x - g.plot.x) / (g.plot.w / slots), slots);
+    }, { passive: false });
+  }
+  ui() { if (this.onUi) this.onUi(); }
+  // Dragging a drawing up or down must not scroll the page, so the browser's own touch panning is off while drawing.
+  syncTouch() { this.host.style.touchAction = this.drawing || this.sel || this.tool !== 'move' ? 'none' : ''; }
+  clampSlots(n) { const g = this.geo; return Math.max(MIN_SLOTS, Math.min(Math.max(g ? g.full : 390, 30), n)); }
+  redraw() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.draw(); }); }
+  setView(first, slots) { const was = !!this.view; this.view = { first, slots }; this.redraw(); if (!was) this.ui(); }
+  resetView() { if (!this.view) return; this.view = null; this.redraw(); this.ui(); }
+  state() {
+    const g = this.geo;
+    return { drawing: this.drawing, tool: this.tool, selected: !!this.sel, pending: !!this.pending, manual: !!this.view,
+      count: g ? drawingsFor(this.app.settings.main, g.open).length : 0 };
+  }
+  setDrawing(on) {
+    this.drawing = !!on;
+    if (!on) { this.tool = 'move'; this.pending = null; this.sel = null; }
+    this.syncTouch(); this.ui(); this.drawOver();
+  }
+  setTool(tool) {
+    this.tool = this.tool === tool ? 'move' : tool;
+    this.pending = null;
+    if (this.tool !== 'move') { this.sel = null; this.drawing = true; }
+    this.syncTouch(); this.ui(); this.drawOver();
+  }
+  deleteSelected() {
+    if (!this.sel) return;
+    removeDrawing(this.app.settings.main, this.sel);
+    this.sel = null; this.syncTouch(); this.ui(); this.drawOver();
+  }
+  clearAll() {
+    const g = this.geo;
+    if (!g) return;
+    clearDrawings(this.app.settings.main, g.open);
+    this.sel = null; this.pending = null; this.syncTouch(); this.ui(); this.drawOver();
+  }
+  // The drawing under a point: an end of a line, its body, or a level.
+  hit(p, coarse) {
+    const g = this.geo;
+    if (!g || !inPlot(g, p)) return null;
+    const list = drawingsFor(this.app.settings.main, g.open), near = coarse ? 20 : 11, edge = coarse ? 13 : 7;
+    const ends = (d) => [xOf(g, d.a.t), g.yv(d.a.p), xOf(g, d.b.t), g.yv(d.b.p)];
+    const picked = list.find(d => d.id === this.sel);
+    if (picked && picked.type === 'line') { // the ends of the selected line win over anything lying across them
+      const [ax, ay, bx, by] = ends(picked);
+      if (Math.hypot(p.x - ax, p.y - ay) <= near) return { d: picked, part: 'a' };
+      if (Math.hypot(p.x - bx, p.y - by) <= near) return { d: picked, part: 'b' };
+    }
+    for (let n = list.length - 1; n >= 0; n--) {
+      const d = list[n];
+      if (d.type === 'level') { if (d.p <= g.hi && d.p >= g.lo && Math.abs(p.y - g.yv(d.p)) <= edge) return { d, part: 'level' }; continue; }
+      const [ax, ay, bx, by] = ends(d);
+      if (distToSegment(p.x, p.y, ax, ay, bx, by) <= edge) return { d, part: 'body' };
+    }
+    return null;
+  }
+  down(p, coarse) {
+    const g = this.geo;
+    this.drag = null;
+    if (!inPlot(g, p)) return;
+    const at = { t: tOf(g, p.x), p: pOf(g, p.y) }, sym = this.app.settings.main;
+    if (this.tool === 'line') {
+      this.drag = { kind: 'new', a: this.pending || at, b: at, start: p, second: !!this.pending };
+    } else if (this.tool === 'level') {
+      const d = addDrawing(sym, { type: 'level', p: at.p });
+      this.sel = d.id; this.drag = { kind: 'level', d, start: p, moved: true };
+      this.ui();
+    } else {
+      const hit = this.hit(p, coarse);
+      // A drawing is first tapped to select it; once selected, dragging moves it. Anything else moves the chart.
+      if (hit && hit.d.id === this.sel) this.drag = { kind: hit.part, d: hit.d, start: p, from: at, a0: hit.d.a && { ...hit.d.a }, b0: hit.d.b && { ...hit.d.b }, moved: false };
+      else this.drag = { kind: 'pan', start: p, first0: g.first, slots0: g.slots, cw0: g.cw, hit, moved: false };
+    }
+    this.drawOver();
+  }
+  move(p) {
+    const g = this.geo, d = this.drag;
+    if (!g || !d) return;
+    if (!d.moved && Math.hypot(p.x - d.start.x, p.y - d.start.y) > 5) d.moved = true;
+    const at = { t: tOf(g, p.x), p: pOf(g, p.y) };
+    if (d.kind === 'pan') {
+      if (d.moved) { this.host.style.cursor = 'grabbing'; this.setView(d.first0 - (p.x - d.start.x) / d.cw0, d.slots0); }
+      else this.drawOver();
+      return;
+    }
+    if (d.kind === 'new') d.b = at;
+    else if (d.kind === 'level') d.d.p = at.p;
+    else if (d.kind === 'a' || d.kind === 'b') d.d[d.kind] = at;
+    else if (d.kind === 'body') {
+      const dt = at.t - d.from.t, dp = at.p - d.from.p;
+      d.d.a = { t: d.a0.t + dt, p: d.a0.p + dp }; d.d.b = { t: d.b0.t + dt, p: d.b0.p + dp };
+    }
+    this.drawOver();
+  }
+  up(p, cancelled) {
+    const g = this.geo, d = this.drag, sym = this.app.settings.main;
+    this.drag = null;
+    this.host.style.cursor = '';
+    if (!d) return;
+    if (d.kind === 'new') {
+      const far = Math.hypot(p.x - d.start.x, p.y - d.start.y) >= 10;
+      if (cancelled || !g) this.pending = null;
+      else if (d.second || far) {
+        // a drag from start to end, or the second of two taps
+        const long = Math.hypot(xOf(g, d.a.t) - xOf(g, d.b.t), g.yv(d.a.p) - g.yv(d.b.p)) >= 8;
+        if (long) this.sel = addDrawing(sym, { type: 'line', day: g.open, a: d.a, b: d.b }).id;
+        this.pending = null; this.tool = 'move';
+      } else this.pending = d.a; // one tap: the start is placed, the next tap ends the line
+      this.syncTouch(); this.ui();
+    } else if (d.kind === 'pan') {
+      if (!d.moved && !cancelled) {
+        const now = performance.now(), again = this.lastTap && now - this.lastTap.t < 320 && Math.hypot(p.x - this.lastTap.x, p.y - this.lastTap.y) < 28;
+        this.lastTap = again ? null : { t: now, x: p.x, y: p.y };
+        if (d.hit) { this.sel = d.hit.d.id; this.drawing = true; this.syncTouch(); this.ui(); }
+        else if (this.sel) { this.sel = null; this.syncTouch(); this.ui(); }
+        else if (again) this.resetView(); // two quick taps on the chart itself go back to the automatic view
+      }
+    } else {
+      // a level or a line was placed or moved
+      if (d.kind === 'level' && this.tool === 'level') this.tool = 'move';
+      saveDrawings(); this.syncTouch(); this.ui();
+    }
+    this.drawOver();
+  }
+  startPinch() {
+    const g = this.geo, [a, b] = [...this.ptrs.values()];
+    if (this.drag && ['level', 'a', 'b', 'body'].includes(this.drag.kind)) saveDrawings();
+    this.drag = { kind: 'pinch', d0: Math.max(24, Math.hypot(a.x - b.x, a.y - b.y)), mid0: (a.x + b.x) / 2, first0: g.first, slots0: g.slots, cw0: g.cw };
+    this.swallow = true; this.hover = null;
+    this.drawOver();
+  }
+  pinch() {
+    const g = this.geo, d = this.drag, [a, b] = [...this.ptrs.values()];
+    if (!g || !a || !b) return;
+    const slots = this.clampSlots(d.slots0 * d.d0 / Math.max(24, Math.hypot(a.x - b.x, a.y - b.y)));
+    const under = d.first0 + (d.mid0 - g.plot.x) / d.cw0; // the candle that was between the fingers stays between them
+    this.setView(under - ((a.x + b.x) / 2 - g.plot.x) / (g.plot.w / slots), slots);
   }
 
   draw() {
@@ -73,9 +275,22 @@ export class PriceChart {
     let slots = Math.min(full, Math.max(minSlots, Math.ceil((li + 1) * 1.3) + 1)), first = 0;
     const maxSlots = Math.max(30, Math.floor(plot.w / 3.4));
     if (slots > maxSlots) { first = Math.max(0, Math.min(full - maxSlots, li - Math.floor(maxSlots * 0.86))); slots = maxSlots; }
+    // The trader's own view (dragged or zoomed) replaces the automatic one until it is reset, or the ticker, the candle
+    // size or the session changes. It is kept where at least a few candles stay on screen.
+    const key = sym + '|' + iv + '|' + sess.open;
+    if (this.viewKey !== key) {
+      this.viewKey = key; this.view = null; this.sel = null; this.pending = null;
+      if (this.drag && this.drag.kind !== 'pinch') this.drag = null;
+      this.syncTouch(); this.ui();
+    }
+    if (this.view) {
+      slots = Math.max(MIN_SLOTS, Math.min(Math.max(full, 30), this.view.slots));
+      first = Math.max(idxOf(bars[0]) + 3 - slots, Math.min(li - 2, this.view.first));
+      this.view = { first, slots };
+    }
     const cw = plot.w / slots;
     const xi = (i) => plot.x + (i - first + 0.5) * cw;
-    const pts = bars.map((b, k) => ({ b, k, i: idxOf(b) })).filter(p => p.i >= first && p.i < first + slots);
+    const pts = bars.map((b, k) => ({ b, k, i: idxOf(b) })).filter(p => p.i > first - 1 && p.i < first + slots);
     if (!pts.length) return;
     let lo = Math.min(...pts.map(p => p.b.l)), hi = Math.max(...pts.map(p => p.b.h));
     const lv = s.show.gex ? app.levelsFor(sym) : null;
@@ -100,13 +315,15 @@ export class PriceChart {
       txt(ctx, fmtPrice(v), plot.x + plot.w + 6, y + 4, { size: 10.5, fam: F.mono, color: C.faint });
     }
     // time axis
-    const spanH = slots * ivMs / 3600e3, everyMin = spanH <= 2.2 ? 30 : spanH <= 4 ? 60 : W < 460 ? 120 : 60;
-    for (let m = 600; m <= 960; m += 30) {
+    const spanH = slots * ivMs / 3600e3, spanMin = spanH * 60;
+    const everyMin = spanMin <= 25 ? 5 : spanMin <= 50 ? 10 : spanMin <= 100 ? 15 : spanH <= 2.2 ? 30 : spanH <= 4 ? 60 : W < 460 ? 120 : 60;
+    for (let m = 570, lastX = -99; m <= 960; m += 5) {
       if ((m - 600) % everyMin) continue;
       const t = sess.open + (m - 570) * 60e3;
       if (t > sess.close) break;
       const x = Math.round(plot.x + ((t - sess.open) / ivMs - first) * cw) + 0.5;
-      if (x < plot.x + 8 || x > plot.x + plot.w - 4) continue;
+      if (x < plot.x + 8 || x > plot.x + plot.w - 4 || x - lastX < 46) continue;
+      lastX = x;
       ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
       txt(ctx, fmtHM(t).replace(':00', '').replace(' ', '').toLowerCase(), x, plot.y + plot.h + 15, { size: 10.5, color: C.faint, align: 'center' });
     }
@@ -205,21 +422,65 @@ export class PriceChart {
     const last = q ? q.last : bars[bars.length - 1].c;
     const ly = Math.round(yv(Math.min(hi, Math.max(lo, last)))) + 0.5;
     ctx.strokeStyle = hexA(C.sky, 0.8); ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
-    ctx.beginPath(); ctx.moveTo(xi(pts[pts.length - 1].i), ly); ctx.lineTo(plot.x + plot.w, ly); ctx.stroke(); ctx.setLineDash([]);
+    // from the newest candle to the axis (from the left edge when the chart has been moved back in time)
+    ctx.beginPath(); ctx.moveTo(xi(li) > plot.x + plot.w ? plot.x : Math.max(plot.x, xi(li)), ly); ctx.lineTo(plot.x + plot.w, ly); ctx.stroke(); ctx.setLineDash([]);
     rr(ctx, plot.x + plot.w + 2, ly - 9, axisW - 2, 18, 4); ctx.fillStyle = C.sky; ctx.fill();
     txt(ctx, fmtPrice(last), plot.x + plot.w + axisW / 2 + 1, ly + 0.5, { size: 10.5, weight: 600, fam: F.mono, color: '#04121c', align: 'center', base: 'middle' });
-    this.geo = { W, H, plot, pts, xi, yv, cw, first, lo, hi, axisW };
+    this.geo = { W, H, plot, pts, xi, yv, cw, first, lo, hi, axisW, slots, full, open: sess.open, ivMs };
     this.drawOver();
   }
 
-  // crosshair + candle read-out, on its own layer so moving a finger never redraws the candles
+  // The trader's trend lines and levels, and the line being drawn.
+  drawMarks(ctx, g) {
+    const { plot, axisW } = g, right = plot.x + plot.w;
+    const list = drawingsFor(this.app.settings.main, g.open), tags = [], handles = [];
+    ctx.save(); ctx.beginPath(); ctx.rect(plot.x, plot.y, plot.w, plot.h); ctx.clip();
+    const line = (a, b, on, ghost) => {
+      const L = a.t <= b.t ? a : b, R = L === a ? b : a;
+      const ax = xOf(g, L.t), ay = g.yv(L.p), bx = xOf(g, R.t), by = g.yv(R.p);
+      ctx.strokeStyle = on ? C.white : C.violet; ctx.lineWidth = on ? 2 : 1.6; ctx.globalAlpha = ghost ? 0.75 : 1; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      if (bx - ax > 1 && bx < right) { // carried on to the right edge at the same slope, so it can be read ahead of price
+        ctx.globalAlpha = ghost ? 0.35 : 0.55; ctx.lineWidth = 1.2; ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(right, by + (by - ay) / (bx - ax) * (right - bx)); ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.globalAlpha = 1;
+      return [[ax, ay], [bx, by]];
+    };
+    for (const d of list) {
+      const on = d.id === this.sel;
+      if (d.type === 'line') { const ends = line(d.a, d.b, on, false); if (on) handles.push(...ends); continue; }
+      if (d.p > g.hi || d.p < g.lo) continue;
+      const y = Math.round(g.yv(d.p)) + 0.5;
+      ctx.strokeStyle = on ? C.white : C.violet; ctx.lineWidth = on ? 2 : 1.4;
+      ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(right, y); ctx.stroke();
+      tags.push({ y, p: d.p, on });
+      if (on) handles.push([right - 16, y]);
+    }
+    if (this.drag && this.drag.kind === 'new') handles.push(...line(this.drag.a, this.drag.b, true, true));
+    else if (this.pending && this.tool === 'line') {
+      const a = this.pending, h = this.hover;
+      if (h && inPlot(g, h)) line(a, { t: tOf(g, h.x), p: pOf(g, h.y) }, true, true);
+      handles.push([xOf(g, a.t), g.yv(a.p)]);
+    }
+    for (const [x, y] of handles) { ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill(); ctx.strokeStyle = C.white; ctx.lineWidth = 2; ctx.stroke(); }
+    ctx.restore();
+    for (const t of tags) {
+      rr(ctx, right + 2, t.y - 9, axisW - 2, 18, 4); ctx.fillStyle = t.on ? C.white : C.violet; ctx.fill();
+      txt(ctx, fmtPrice(t.p), right + axisW / 2 + 1, t.y + 0.5, { size: 10.5, weight: 600, fam: F.mono, color: C.ink, align: 'center', base: 'middle' });
+    }
+  }
+
+  // drawings, crosshair and candle read-out, on their own layer so moving a finger never redraws the candles
   drawOver() {
     const { ctx, w: W } = fit(this.over);
     const g = this.geo, h = this.hover;
-    if (!g || !h) return;
+    if (!g) return;
+    this.drawMarks(ctx, g);
+    if (!h || (this.drag && this.drag.kind === 'pinch')) return;
     const { plot, pts, xi, cw, first, lo, hi, axisW } = g;
     if (h.x < plot.x || h.x > plot.x + plot.w || h.y < plot.y || h.y > plot.y + plot.h) return;
-    const slot = Math.floor((h.x - plot.x) / cw) + first;
+    const slot = Math.floor((h.x - plot.x) / cw + first);
     let best = null; for (const p of pts) if (!best || Math.abs(p.i - slot) < Math.abs(best.i - slot)) best = p;
     if (!best || Math.abs(best.i - slot) > 3) return;
     const x = Math.round(xi(best.i)) + 0.5, y = Math.round(h.y) + 0.5;

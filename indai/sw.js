@@ -1,12 +1,12 @@
 // INDAI website service worker: offline shell + always-fresh app files.
 // Market data, the backend and the voice models' downloads go straight to the network
 // (the models are kept by the browser's own model cache after the first download).
-const CACHE = 'indai-web-v4';
+const CACHE = 'indai-web-v5';
 // The on-device voice runtime (about 24 MB) is kept in its own cache so it is downloaded once and works offline.
 // sync.sh changes this name whenever those files change, which makes browsers fetch the new ones.
 const VOICE = 'indai-web-voice-17629cb';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './css/app.css',
-  './js/app.js', './js/views.js', './js/sheets.js', './js/chart.js', './js/demo.js', './js/ideas.js', './js/lock.js', './js/push.js', './js/retro.js', './js/hud.js', './js/panels.js',
+  './js/app.js', './js/views.js', './js/sheets.js', './js/chart.js', './js/draw.js', './js/demo.js', './js/ideas.js', './js/lock.js', './js/push.js', './js/retro.js', './js/hud.js', './js/panels.js',
   './js/feeds.js', './js/market.js', './js/store.js', './js/indai.js', './js/voice.js', './js/relay.js', './js/options.js', './js/analysis.js', './js/speech.js', './js/signals.js',
   './fonts/geist.woff2', './fonts/geist-mono.woff2', './brand/indai-logo.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });

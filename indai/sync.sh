@@ -5,7 +5,7 @@
 #   ./sync.sh /path/to/jarvis-command-center
 #
 # Shared files are copied byte for byte. Never edit them here: change them in the source repo, then run this.
-# Website-only files (app.js, views.js, sheets.js, ideas.js, retro.js, lock.js, push.js, chart.js, demo.js, hud.js, panels.js, css/, index.html, sw.js, tradingview/) are not touched.
+# Website-only files (app.js, views.js, sheets.js, ideas.js, retro.js, lock.js, push.js, chart.js, draw.js, demo.js, hud.js, panels.js, css/, index.html, sw.js, tradingview/) are not touched.
 # tradingview/indai-backtest.pine is a hand port of the scanner in signals.js: when scanSetups changes, port the change there too.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

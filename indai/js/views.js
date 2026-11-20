@@ -220,6 +220,31 @@ export function initViews(app) {
   $('ch-next').addEventListener('click', () => app.cycleSymbol(1));
   $('ch-tf').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) app.setTimeframe(b.dataset.iv); });
   $('ch-show').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) app.toggleShow(b.dataset.show); });
+  // Moving, zooming and drawing on the chart. The bar under the chart tools holds the drawing tools while it is open.
+  app.chart = chart;
+  chart.onUi = () => {
+    const st = chart.state(), draw = $('ch-draw');
+    draw.classList.toggle('on', st.drawing); draw.setAttribute('aria-pressed', st.drawing);
+    $('ch-drawbar').hidden = !st.drawing;
+    for (const b of $('ch-tools').children) { const on = b.dataset.tool === st.tool; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
+    $('ch-del').disabled = !st.selected;
+    $('ch-clear').disabled = !st.count;
+    $('ch-reset').hidden = !st.manual;
+    setText($('ch-hint'), st.tool === 'line' ? (st.pending ? 'Now tap where the line ends.' : 'Drag on the chart, or tap where the line starts and then where it ends.')
+      : st.tool === 'level' ? 'Tap the price for the level.'
+      : st.selected ? 'Drag it to move it. Drag an end of a line to change it.'
+      : st.count ? 'Tap a line or a level to move or delete it.' : 'Pick Trend line or Level, then draw on the chart.');
+  };
+  $('ch-draw').addEventListener('click', () => chart.setDrawing(!chart.drawing));
+  $('ch-tools').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) chart.setTool(b.dataset.tool); });
+  $('ch-del').addEventListener('click', () => chart.deleteSelected());
+  $('ch-clear').addEventListener('click', () => chart.clearAll());
+  $('ch-reset').addEventListener('click', () => chart.resetView());
+  document.addEventListener('keydown', (e) => {
+    if (!chart.drawing || e.target.closest('input, textarea, select, [contenteditable]')) return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && chart.sel) { e.preventDefault(); chart.deleteSelected(); }
+    else if (e.key === 'Escape') chart.setDrawing(false);
+  });
   $('ch-deep').addEventListener('click', () => app.openDeepDive());
   $('ch-tv').addEventListener('click', () => app.openTradingView());
 

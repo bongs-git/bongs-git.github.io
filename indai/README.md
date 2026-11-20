@@ -12,6 +12,8 @@ same backend, same brain, same voice. Only the screens are different.
 - Ideas strip under the top bar on every screen: each setup alert the moment its candle confirms (and "forming" a minute or
   more before), newest first. Tap one for the reasons, the sized contract, stop, entry and target, what price did next, and
   one tap to rate it or see it on the chart. The day's ideas survive a reload, and ones you missed are caught up quietly.
+- A chart you can work on: drag to move it, pinch or scroll to zoom, two quick taps to reset. "Draw" adds trend lines and
+  price levels you can move, change and delete; they are kept on the device per ticker.
 - Retrospective (button in Ideas, best after the close): how the day's setups did, where they missed most (time of day, kind
   of setup, direction, ticker, entry, stop, target), and what INDAI would change. You apply the changes; she alerts with
   them from then on, and each new day checks whether they held up.

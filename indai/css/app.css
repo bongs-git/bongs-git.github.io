@@ -266,6 +266,19 @@ body[data-tab="watch"] .view[data-view="watch"], body[data-tab="chart"] .view[da
 .chart-host .over { pointer-events: none; }
 .chart-note { position: absolute; left: 8px; bottom: 26px; font-size: 11px; font-weight: 600; color: var(--amber); pointer-events: none; }
 .chart-note.quiet { color: var(--faint); font-weight: 500; }
+/* drawing on the chart: the tools sit on their own line under the chart tools while drawing is on */
+.chart-tools { flex-wrap: wrap; }
+.chart-actions { align-self: start; } /* keeps its height when the drawing bar makes the tools taller */
+#ch-draw { flex: none; }
+.drawbar { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.draw-hint { flex: 1 1 180px; min-width: 0; font-size: 12.5px; line-height: 1.35; color: var(--dim); }
+.chart-reset { position: absolute; top: 6px; right: 64px; background: rgba(5,7,9,.86); }
+@media (max-width: 640px) {
+  #ch-draw { width: 40px; padding: 0; justify-content: center; } #ch-draw span { display: none; }
+}
+@media (max-width: 380px) {
+  .chart-tools { gap: 6px; } .chart-tools .seg button { min-width: 34px; padding: 0 7px; }
+}
 
 /* ---------- levels, lead/lag ---------- */
 .lv-rows { display: grid; gap: 2px; }
