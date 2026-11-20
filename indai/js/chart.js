@@ -13,7 +13,14 @@ const MIN_SLOTS = 8;
 // Between the chart's pixels and its time and price, for the view in `g` (the geometry of the last draw).
 // Today's candles sit at their minute of the session; earlier sessions are packed to the left of them without the
 // overnight gaps, so a time before today's open is looked up among those candles.
+// Pre-market and after-hours candles after the session on the chart follow it one slot each, without the overnight gap.
 const slotOf = (g, t) => {
+  if (g.X && t >= g.xb[0].t) {
+    let lo = 0, hi = g.X - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (g.xb[m].t <= t) lo = m; else hi = m - 1; }
+    const part = (t - g.xb[lo].t) / g.ivMs;
+    return g.full + lo + (lo === g.X - 1 ? part : Math.min(1, part));
+  }
   if (!g.H || t >= g.open) return (t - g.open) / g.ivMs;
   const h = g.hist;
   if (t <= h[0].t) return -g.H + (t - h[0].t) / g.ivMs;
@@ -22,6 +29,7 @@ const slotOf = (g, t) => {
   return lo - g.H + Math.min(1, (t - h[lo].t) / g.ivMs);
 };
 const timeOf = (g, s) => {
+  if (g.X && s >= g.full) { const j = s - g.full, k = Math.min(g.X - 1, Math.floor(j)); return g.xb[k].t + (j - k) * g.ivMs; }
   if (!g.H || s >= 0) return g.open + s * g.ivMs;
   const j = s + g.H, k = Math.min(g.H - 1, Math.floor(j));
   return j < 0 ? g.hist[0].t + j * g.ivMs : g.hist[k].t + (j - k) * g.ivMs;
@@ -336,6 +344,9 @@ export class PriceChart {
     const under = d.first0 + (d.mid0 - g.plot.x) / d.cw0; // the candle that was between the fingers stays between them
     this.setView(under - ((a.x + b.x) / 2 - g.plot.x) / (g.plot.w / slots), slots);
   }
+  // The time under a pixel across the chart, and back: what a drawing's ends are stored and placed by.
+  timeAt(x) { return this.geo ? tOf(this.geo, x) : null; }
+  xAt(t) { return this.geo ? xOf(this.geo, t) : null; }
 
   draw() {
     const { ctx, w: W, h: H } = fit(this.base);
@@ -356,11 +367,13 @@ export class PriceChart {
     const idxOf = (b) => Math.round((b.t - sess.open) / ivMs);
     // Fit the chart to the session so far, with room to the right, instead of leaving most of it empty in the morning.
     // On a narrow screen, show the most recent stretch at a readable candle width instead of squeezing the whole day in.
-    const full = Math.max(bars.length, Math.ceil((sess.close - sess.open) / ivMs)), li = idxOf(bars[bars.length - 1]);
+    const full = Math.max(bars.length, Math.ceil((sess.close - sess.open) / ivMs)), li0 = idxOf(bars[bars.length - 1]);
+    // Once the session is over, its after-hours candles and the next morning's pre-market follow it, one slot each.
+    const xa = app.ext ? app.ext.after(sym, iv, sess.close) : [], XN = xa.length, li = XN ? full + XN - 1 : li0;
     const minSlots = { '1min': 45, '5min': 30, '15min': 14 }[iv] || 30;
-    let slots = Math.min(full, Math.max(minSlots, Math.ceil((li + 1) * 1.3) + 1)), first = 0;
+    let slots = XN ? li + 3 : Math.min(full, Math.max(minSlots, Math.ceil((li + 1) * 1.3) + 1)), first = 0;
     const maxSlots = Math.max(30, Math.floor(plot.w / 3.4));
-    if (slots > maxSlots) { first = Math.max(0, Math.min(full - maxSlots, li - Math.floor(maxSlots * 0.86))); slots = maxSlots; }
+    if (slots > maxSlots) { first = Math.max(0, Math.min((XN ? li + 3 : full) - maxSlots, li - Math.floor(maxSlots * 0.86))); slots = maxSlots; }
     // The trader's own view (dragged or zoomed) replaces the automatic one until it is reset, or the ticker, the candle
     // size or the session changes. It is kept where at least a few candles stay on screen.
     const key = sym + '|' + iv + '|' + sess.open;
@@ -372,7 +385,7 @@ export class PriceChart {
     }
     // Earlier sessions, when the trader has scrolled or zoomed back to them, sit at negative slots left of today's open.
     const hs = app.history ? app.history.series(sym, iv, sess.open) : null, HN = hs ? hs.bars.length : 0;
-    const zoomMax = Math.min(2400, Math.max(full, 30) + HN);
+    const zoomMax = Math.min(2400, Math.max(full, 30) + HN + XN);
     if (this.view) {
       slots = Math.max(MIN_SLOTS, Math.min(zoomMax, this.view.slots));
       first = Math.max((HN ? -HN : idxOf(bars[0])) + 3 - slots, Math.min(li - 2, this.view.first));
@@ -382,8 +395,9 @@ export class PriceChart {
     const cw = plot.w / slots;
     const xi = (i) => plot.x + (i - first + 0.5) * cw;
     const pts = [];
-    for (let j = Math.max(0, Math.ceil(first - 1 + HN)); j < HN && j - HN < first + slots; j++) pts.push({ b: hs.bars[j], i: j - HN, e5: hs.e5[j], e12: hs.e12[j], e34: hs.e34[j], e50: hs.e50[j], vw: hs.vw[j], day: hs.day[j] });
-    bars.forEach((b, k) => { const i = idxOf(b); if (i > first - 1 && i < first + slots) pts.push({ b, i, e5: e5[k], e12: e12[k], e34: e34[k], e50: e50[k], vw: vw[k], day: -1 }); });
+    for (let j = Math.max(0, Math.ceil(first - 1 + HN)); j < HN && j - HN < first + slots; j++) pts.push({ b: hs.bars[j], i: j - HN, e5: hs.e5[j], e12: hs.e12[j], e34: hs.e34[j], e50: hs.e50[j], vw: hs.vw[j], day: hs.day[j], x: hs.x[j] });
+    bars.forEach((b, k) => { const i = idxOf(b); if (i > first - 1 && i < first + slots) pts.push({ b, i, e5: e5[k], e12: e12[k], e34: e34[k], e50: e50[k], vw: vw[k], day: -1, x: 0 }); });
+    xa.forEach((b, k) => { const i = full + k; if (i > first - 1 && i < first + slots) pts.push({ b, i, e5: null, e12: null, e34: null, e50: null, vw: null, day: -2, x: 1 }); });
     if (!pts.length) return;
     let lo = Math.min(...pts.map(p => p.b.l)), hi = Math.max(...pts.map(p => p.b.h));
     const lv = s.show.gex ? app.levelsFor(sym) : null;
@@ -448,18 +462,34 @@ export class PriceChart {
       cloud('e34', 'e50', 'rgba(110,195,242,0.13)', 'rgba(240,150,74,0.13)');
       cloud('e5', 'e12', 'rgba(62,207,142,0.22)', 'rgba(242,112,107,0.22)');
     }
+    // Outside regular hours: a tint behind each stretch of pre-market or after-hours candles, with its name, and
+    // those candles drawn fainter so the regular session still reads first.
+    for (let n = 0; n < pts.length;) {
+      if (!pts[n].x) { n++; continue; }
+      const kind = app.ext.kind(pts[n].b.t);
+      let z = n;
+      while (z + 1 < pts.length && pts[z + 1].x && pts[z + 1].i - pts[z].i === 1 && app.ext.kind(pts[z + 1].b.t) === kind) z++;
+      const x0 = xi(pts[n].i) - cw / 2, x1 = xi(pts[z].i) + cw / 2, name = kind === 'pre' ? 'Pre-market' : 'After hours';
+      ctx.fillStyle = hexA(kind === 'pre' ? C.amber : C.sky, 0.055); ctx.fillRect(x0, plot.y - 4, x1 - x0, plot.h + 8);
+      ctx.font = `600 10px ${F.sans}`;
+      if (x1 - Math.max(x0, plot.x) > ctx.measureText(name).width + 10) txt(ctx, name, Math.max(x0, plot.x) + 5, plot.y + 10, { size: 10, weight: 600, color: C.dim });
+      n = z + 1;
+    }
     const bw = Math.max(1, Math.min(14, cw * 0.66));
     for (const p of pts) {
       const b = p.b, x = xi(p.i), up = b.c >= b.o;
+      ctx.globalAlpha = p.x ? 0.62 : 1;
       ctx.strokeStyle = ctx.fillStyle = up ? C.up : C.down;
       ctx.lineWidth = Math.max(1, Math.min(1.5, cw * 0.18));
       ctx.beginPath(); ctx.moveTo(x, yv(b.h)); ctx.lineTo(x, yv(b.l)); ctx.stroke();
       const y1 = yv(Math.max(b.o, b.c)), y2 = yv(Math.min(b.o, b.c));
       ctx.fillRect(x - bw / 2, y1, bw, Math.max(1, y2 - y1));
     }
+    ctx.globalAlpha = 1;
     if (s.show.vwap) {
       ctx.strokeStyle = C.gold; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.beginPath();
-      pts.forEach((p, n) => { const x = xi(p.i), y = yv(p.vw); n && pts[n - 1].day === p.day ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      let pen = null; // the session whose line is being drawn; candles outside regular hours have no VWAP and lift the pen
+      for (const p of pts) { if (p.vw == null) { pen = null; continue; } const x = xi(p.i), y = yv(p.vw); if (pen === p.day) ctx.lineTo(x, y); else ctx.moveTo(x, y); pen = p.day; }
       ctx.stroke(); ctx.setLineDash([]);
     }
     ctx.restore();
@@ -482,9 +512,10 @@ export class PriceChart {
       ctx.fillStyle = 'rgba(5,7,9,0.72)'; ctx.fillRect(pick.x0, pick.y0 - 1, pick.x1 - pick.x0, pick.y1 - pick.y0 + 1);
       txt(ctx, str, pick.x0 + 3, pick.y1 - 3, { size, weight: 600, color });
     };
-    if (s.show.vwap) {
+    const lp = s.show.vwap ? [...pts].reverse().find(p => p.vw != null) : null;
+    if (lp) {
       // to the right of the last candle when there is room, otherwise just left of it, below the line
-      const lp = pts[pts.length - 1], vx = xi(lp.i), vy = yv(lp.vw);
+      const vx = xi(lp.i), vy = yv(lp.vw);
       label('VWAP', 'right', vy, { size: 10, color: C.gold, spots: [[vx + 8, vy + 4], [vx + 8, vy - 8], [Math.max(plot.x + 4, vx - 40), vy + 15], [Math.max(plot.x + 4, vx - 40), vy - 8]] });
     }
     if (lv) {
@@ -531,10 +562,30 @@ export class PriceChart {
     const ly = Math.round(yv(Math.min(hi, Math.max(lo, last)))) + 0.5;
     ctx.strokeStyle = hexA(C.sky, 0.8); ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
     // from the newest candle to the axis (from the left edge when the chart has been moved back in time)
-    ctx.beginPath(); ctx.moveTo(xi(li) > plot.x + plot.w ? plot.x : Math.max(plot.x, xi(li)), ly); ctx.lineTo(plot.x + plot.w, ly); ctx.stroke(); ctx.setLineDash([]);
-    rr(ctx, plot.x + plot.w + 2, ly - 9, axisW - 2, 18, 4); ctx.fillStyle = C.sky; ctx.fill();
-    txt(ctx, fmtPrice(last), plot.x + plot.w + axisW / 2 + 1, ly + 0.5, { size: 10.5, weight: 600, fam: F.mono, color: '#04121c', align: 'center', base: 'middle' });
-    this.geo = { W, plot, pts, xi, yv, cw, first, lo, hi, autoLo, autoHi, axisW, slots, full, maxSlots: zoomMax, open: sess.open, ivMs, H: HN, hist: hs ? hs.bars : [] };
+    ctx.beginPath(); ctx.moveTo(xi(li0) > plot.x + plot.w ? plot.x : Math.max(plot.x, xi(li0)), ly); ctx.lineTo(plot.x + plot.w, ly); ctx.stroke(); ctx.setLineDash([]);
+    // The extended-hours price gets its own tag, from the newest pre-market or after-hours candle. When the two
+    // prices are close, the regular tag steps aside so both can be read; its line stays at the true price.
+    const xl = XN && app.ext ? app.ext.last(sym) : null, ey = xl ? Math.round(yv(Math.min(hi, Math.max(lo, xl.price)))) + 0.5 : null;
+    const ty = xl && Math.abs(ly - ey) < 19 ? ey + (ly >= ey ? 19 : -19) : ly;
+    rr(ctx, plot.x + plot.w + 2, ty - 9, axisW - 2, 18, 4); ctx.fillStyle = C.sky; ctx.fill();
+    txt(ctx, fmtPrice(last), plot.x + plot.w + axisW / 2 + 1, ty + 0.5, { size: 10.5, weight: 600, fam: F.mono, color: '#04121c', align: 'center', base: 'middle' });
+    if (xl) {
+      ctx.strokeStyle = hexA(C.amber, 0.85); ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(xi(li) > plot.x + plot.w ? plot.x : Math.max(plot.x, xi(li)), ey); ctx.lineTo(plot.x + plot.w, ey); ctx.stroke(); ctx.setLineDash([]);
+      rr(ctx, plot.x + plot.w + 2, ey - 9, axisW - 2, 18, 4); ctx.fillStyle = C.amber; ctx.fill();
+      txt(ctx, fmtPrice(xl.price), plot.x + plot.w + axisW / 2 + 1, ey + 0.5, { size: 10.5, weight: 600, fam: F.mono, color: '#1c1204', align: 'center', base: 'middle' });
+    }
+    // the hours under the candles after the close, and the date where the next morning starts
+    for (let k = 0, lastX = Math.round(plot.x + (full - first) * cw); k < XN; k++) {
+      const t = xa[k].t, x = Math.round(plot.x + (full + k - first) * cw) + 0.5, newDay = k > 0 && t - xa[k - 1].t > 3 * 3600e3;
+      if (!newDay && (t / 60e3) % everyMin) continue;
+      if (x < plot.x + 8 || x > plot.x + plot.w - (newDay ? 30 : 4) || x - lastX < 46) continue;
+      lastX = x;
+      ctx.strokeStyle = newDay ? 'rgba(255,255,255,0.16)' : C.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
+      if (newDay) txt(ctx, fmtDay(t), x + 4, plot.y + plot.h + 15, { size: 10.5, weight: 600, color: C.dim });
+      else txt(ctx, fmtHM(t).replace(':00', '').replace(' ', '').toLowerCase(), x, plot.y + plot.h + 15, { size: 10.5, color: C.faint, align: 'center' });
+    }
+    this.geo = { W, plot, pts, xi, yv, cw, first, lo, hi, autoLo, autoHi, axisW, slots, full, maxSlots: zoomMax, open: sess.open, ivMs, H: HN, hist: hs ? hs.bars : [], X: XN, xb: xa };
     this.drawOver();
   }
 

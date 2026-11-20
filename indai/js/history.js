@@ -3,10 +3,12 @@
 // In demo mode earlier sessions are made up, like everything else there.
 import { RELAY_URL } from './relay.js';
 import { aggregate, ema, vwap, etParts, sessionTimes, isTradingDay, chartSession, INTERVAL_MS } from './market.js';
+import { initExtended } from './ext.js';
 
 const PAGE = 1000, DEMO_DAYS = 8;
 
 export function initHistory(app) {
+  initExtended(app); // pre-market and after-hours candles, woven between the sessions below
   const store = new Map(); // ticker -> { bars: one-minute candles oldest first, done, busy, failedAt, cache }
   const entry = (sym) => { if (!store.has(sym)) store.set(sym, { bars: [], done: false, busy: false, failedAt: 0, cache: {} }); return store.get(sym); };
   const regular = (t) => { const p = etParts(t); if (!isTradingDay(p.y, p.m, p.d)) return false; const s = sessionTimes(p.y, p.m, p.d); return t >= s.open && t < s.close; };
@@ -41,6 +43,7 @@ export function initHistory(app) {
         if (!r.ok) throw new Error('history ' + r.status);
         rows = (await r.json()).bars || []; last = rows.length < PAGE;
         if (rows.length) e.oldest = Math.min(...rows.map(b => +b.t));
+        app.ext.take(sym, rows); // the same page carries the candles outside regular hours
       }
       const add = rows.map(b => ({ t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v || 0 }))
         .filter(b => b.t % 60e3 === 0 && b.c > 0 && b.o > 0 && regular(b.t) && (!e.bars.length || b.t < e.bars[0].t)).sort((a, b) => a.t - b.t);
@@ -52,18 +55,25 @@ export function initHistory(app) {
 
   app.history = {
     // Candles of one size that ended before `before` (the open of the session on the chart), oldest first, with the
-    // same session-by-session averages the chart draws for today.
+    // same session-by-session averages the chart draws for today. Pre-market and after-hours candles sit between the
+    // sessions in time order, marked in `x`; the averages are the regular session's, so those candles carry none.
     series(sym, iv, before) {
-      const e = entry(sym), key = iv + '|' + before + '|' + e.bars.length;
+      const e = entry(sym), key = iv + '|' + before + '|' + e.bars.length + '|' + app.ext.stamp(sym, before);
       if (e.cache.key === key) return e.cache;
-      const src = e.bars.filter(b => b.t < before), bars = iv === '1min' ? src : aggregate(src, INTERVAL_MS[iv]);
-      const out = { key, bars, e5: [], e12: [], e34: [], e50: [], vw: [], day: [], starts: [] };
+      const reg = e.bars.filter(b => b.t < before), extra = app.ext.rows(sym, before);
+      // five- and fifteen-minute candles never straddle 9:30 or 4:00, so a candle is wholly inside or outside the session
+      const src = extra.length ? [...reg, ...extra].sort((a, b) => a.t - b.t) : reg, bars = iv === '1min' ? src : aggregate(src, INTERVAL_MS[iv]);
+      const out = { key, bars, e5: [], e12: [], e34: [], e50: [], vw: [], day: [], starts: [], x: [] };
       for (let a = 0, d = 0; a < bars.length; d++) {
         let z = a + 1;
         while (z < bars.length && bars[z].t - bars[z - 1].t < 3 * 3600e3) z++;
-        const part = bars.slice(a, z), closes = part.map(b => b.c);
-        out.starts.push(a);
-        out.e5.push(...ema(closes, 5)); out.e12.push(...ema(closes, 12)); out.e34.push(...ema(closes, 34)); out.e50.push(...ema(closes, 50)); out.vw.push(...vwap(part));
+        const inside = [];
+        for (let k = a; k < z; k++) { const x = extra.length && app.ext.kind(bars[k].t) ? 1 : 0; out.x.push(x); if (!x) inside.push(k); }
+        const part = inside.map(k => bars[k]), closes = part.map(b => b.c);
+        const lines = { e5: ema(closes, 5), e12: ema(closes, 12), e34: ema(closes, 34), e50: ema(closes, 50), vw: vwap(part) };
+        for (const name in lines) { const col = new Array(z - a).fill(null); inside.forEach((k, n) => { col[k - a] = lines[name][n]; }); out[name].push(...col); }
+        // this morning's pre-market runs straight into the open, which the chart already marks with the date
+        if (inside.length || z < bars.length || before - bars[z - 1].t > 3 * 3600e3) out.starts.push(a);
         for (let k = a; k < z; k++) out.day.push(d);
         a = z;
       }

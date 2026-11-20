@@ -8,6 +8,7 @@ here so whoever works on the website next can run them.
 python3 -m http.server 8765 --bind 127.0.0.1 &
 cd indai/tests && npm i playwright && npx playwright install chromium
 node chart-test.js        # moving, zooming, axes, drawing, earlier sessions, the TradingView panel
+node ext-test.js          # pre-market and after-hours candles and the price line (sets its own clock: same result at any hour)
 node flow.js              # the whole app in demo mode, phone and laptop
 node mock.js              # against a stand-in backend that follows HANDOFF.md (lib.js is that stand-in)
 node ideas-test.js        # ideas strip, list, alerts, catch-up (its catch-up checks need a session that has started today)

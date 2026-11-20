@@ -61,6 +61,7 @@ a { color: var(--gold); }
 .seg button.on { background: var(--gold-soft); color: var(--gold); font-weight: 600; }
 .seg.toggles .t-ema.on { color: var(--up); background: rgba(62,207,142,.12); }
 .seg.toggles .t-gex.on { color: var(--amber); background: rgba(240,179,74,.12); }
+.seg.toggles .t-ext.on { color: var(--sky); background: rgba(110,195,242,.12); }
 input[type=text], input[type=password], input[type=number], textarea, select { width: 100%; min-height: var(--hit); padding: 0 12px; background: var(--raised); border: 1px solid var(--line2); border-radius: 8px; color: var(--text); font-size: 16px; }
 textarea { padding: 10px 12px; min-height: 84px; resize: vertical; line-height: 1.4; font-family: var(--mono); font-size: 14px; }
 select { appearance: none; -webkit-appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
@@ -260,6 +261,12 @@ body[data-tab="watch"] .view[data-view="watch"], body[data-tab="chart"] .view[da
 .quote .last { font-size: 22px; font-weight: 500; margin-left: 6px; }
 .quote .chg { font-size: 13px; font-weight: 600; white-space: nowrap; }
 .quote .hl { font-size: 12px; color: var(--faint); white-space: nowrap; margin-left: auto; display: none; }
+/* A second line under the price, always there so nothing jumps: the pre-market or after-hours price when there
+   is one, otherwise the day's high and low (which is why the one-line high and low above is no longer shown). */
+.quote { flex-wrap: wrap; }
+.quote .ext { flex: 0 0 100%; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 38px; margin-top: -4px; }
+.quote .ext.day { color: var(--faint); font-weight: 500; }
+#ch-hl { display: none; }
 .chart-tools { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: space-between; }
 .chart-host { position: relative; height: clamp(250px, calc(100dvh - 400px), 520px); min-height: 220px; touch-action: pan-y; cursor: crosshair; }
 .chart-host canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -284,8 +291,12 @@ body[data-tab="watch"] .view[data-view="watch"], body[data-tab="chart"] .view[da
 @media (max-width: 640px) {
   #ch-draw { width: 40px; padding: 0; justify-content: center; } #ch-draw span { display: none; }
 }
+/* candle size, four overlay switches and Draw stay on one line on a phone */
+@media (max-width: 430px) {
+  .chart-tools { gap: 6px; } .chart-tools .seg button { min-width: 34px; padding: 0 6px; }
+}
 @media (max-width: 380px) {
-  .chart-tools { gap: 6px; } .chart-tools .seg button { min-width: 34px; padding: 0 7px; }
+  .chart-tools .seg button { min-width: 30px; padding: 0 5px; font-size: 12.5px; }
 }
 
 /* ---------- levels, lead/lag ---------- */

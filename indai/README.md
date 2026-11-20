@@ -14,6 +14,11 @@ same backend, same brain, same voice. Only the screens are different.
   one tap to rate it or see it on the chart. The day's ideas survive a reload, and ones you missed are caught up quietly.
 - A chart you can work on: drag to move it, pinch or scroll to zoom, two quick taps to reset. "Draw" adds trend lines and
   price levels you can move, change and delete; they are kept on the device per ticker.
+- Pre-market and after-hours on the chart: once the session is over, its after-hours candles and the next morning's
+  pre-market follow it (tinted, a little fainter, no VWAP or EMA), and earlier sessions carry theirs when you scroll
+  back. "Ext" in the chart's switches turns them off. Under the price, a second line shows the pre-market or
+  after-hours price and its change from the regular close, the way TradingView does; during the session it shows
+  the day's high and low. With a Finnhub key in Settings, that price and its candle move trade by trade.
 - Drag the price axis or the time axis to stretch or squeeze that scale. Drag the chart back past the open to see
   earlier sessions (as many as the TradingView bridge has stored). "TradingView chart" shows TradingView's own
   chart in the panel for deeper history and their tools.
