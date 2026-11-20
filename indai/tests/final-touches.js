@@ -1,11 +1,13 @@
 const assert = require('node:assert/strict');
 const { chromium, URL, installBackend, sleep } = require('./lib.js');
+const { quietFixture } = require('./browser.cjs');
 const NOW = Date.parse('2026-11-19T18:00:00Z');
 (async () => {
   const browser = await chromium.launch();
   for (const width of [360, 820, 1440]) {
     const context = await browser.newContext({ viewport: { width, height: 1100 }, hasTouch: width < 1000, isMobile: width < 700 });
     const page = await context.newPage(); page.setDefaultTimeout(20000);
+    await quietFixture(page);
     await page.clock.install({time:new Date(NOW)});
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await installBackend(page, { ymd: '2026-11-19', minutes: 210 }, (request, json) => json(request.method() === 'GET' ? { configured: false, passcode: false } : { error: 'bad_key', message: 'Unknown profile key.' }, request.method() === 'GET' ? 200 : 400));
@@ -37,7 +39,9 @@ const NOW = Date.parse('2026-11-19T18:00:00Z');
     console.log(`PASS ${width}px truthful bridge source, stale state and missing previous close`);
 
     await page.evaluate(() => window.__indai.app.indai.analyzeIdea({ sym: 'IWM', type: 'C', strike: 100, expiry: '2026-11-19' }));
-    await page.waitForFunction(() => document.getElementById('sb-analysis').textContent.includes('Option prices are unavailable right now'));
+    await page.waitForFunction(() => document.getElementById('sb-analysis').textContent.includes('Option prices are unavailable right now')).catch(async error => {
+      console.log('Analysis diagnostics', await page.evaluate(() => { const a=window.__indai.app; return {focus:a.focus,failure:a.analysisFailure,option:a.marketData.option('IWM'),body:document.getElementById('sb-analysis').textContent,hidden:document.hidden,dirty:[...a.dirty]}; })); throw error;
+    });
     await page.evaluate(() => { const a = window.__indai.app; a.closeFocus(); a.openCalc(); });
     await page.waitForFunction(() => document.getElementById('c-note').textContent.includes('Option prices are unavailable right now'));
     await page.evaluate(() => { const a = window.__indai.app; a.closeFocus(); a.ui.showTab('chart'); a.views.levels.render(); });
