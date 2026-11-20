@@ -232,11 +232,12 @@ export function initViews(app) {
     $('ch-undo').disabled = !st.undo;
     $('ch-clear').disabled = !st.count;
     $('ch-reset').hidden = !st.manual;
-    setText($('ch-hint'), ['line', 'rect'].includes(st.tool) ? (st.pending ? 'Now tap where the line ends.' : 'Drag on the chart, or tap where the line starts and then where it ends.')
+    setText($('ch-hint'), st.tool === 'rect' ? (st.pending ? 'Tap the opposite corner.' : 'Drag between opposite corners, or tap each corner. Hold to magnify.')
+      : st.tool === 'line' ? (st.pending ? 'Now tap where the line ends.' : 'Drag on the chart, or tap where the line starts and then where it ends.')
       : st.tool === 'ray' ? 'Tap the start of a horizontal ray. Hold to magnify.'
       : st.tool === 'level' ? 'Tap the price for the level.'
       : st.selected ? 'Drag it to move it. Drag an end of a line to change it.'
-      : st.count ? 'Tap a line or a level to move or delete it.' : 'Pick Trend line or Level, then draw on the chart.');
+      : st.count ? 'Tap a drawing to move or delete it.' : 'Pick a drawing tool, then draw on the chart.');
   };
   $('ch-draw').addEventListener('click', () => chart.setDrawing(!chart.drawing));
   $('ch-tools').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) chart.setTool(b.dataset.tool); });
@@ -265,8 +266,13 @@ export function initViews(app) {
     $('tv-out').href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(s.main)}`;
     if (key === tvKey) return;
     tvKey = key;
-    frame.removeAttribute('src');
-    frame.srcdoc = tvOn ? `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#050709;color-scheme:dark}tv-advanced-chart{display:block;width:100%;height:100%}</style><script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-advanced-chart.js"></script></head><body><tv-advanced-chart symbol="${esc(s.main)}" interval="${TV_IV[s.interval] || '5'}" theme="dark" timezone="America/New_York"></tv-advanced-chart></body></html>` : '';
+    // Use the vendor-hosted embed directly: its Web Component accesses cookies and cannot run
+    // in an opaque srcdoc sandbox. Vendor scripts remain cross-origin from INDAI and its token.
+    frame.src = tvOn ? 'https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=en#' + encodeURIComponent(JSON.stringify({
+      symbol: s.main, interval: TV_IV[s.interval] || '5', timezone: 'America/New_York', theme: 'dark', style: '1',
+      allow_symbol_change: true, hide_side_toolbar: false, withdateranges: true, save_image: false,
+      width: '100%', height: '100%', support_host: 'https://www.tradingview.com',
+    })) : 'about:blank';
 
   };
   app.showTradingView = (on) => { tvOn = on == null ? !tvOn : !!on; if (tvOn) chart.setDrawing(false); syncTv(); app.markDirty('chart'); };

@@ -30,7 +30,7 @@ jobs:
           case "$GROUP" in
             core) tests='flow.js mock.js extra.js bottom.js smoke.js' ;;
             features) tests='chart-test.js ideas-test.js retro-test.js final-touches.js' ;;
-            guardrails) tests='lock-test.js budget.js sound.js swpush.js resume.js retro-unit.mjs pine-ref.mjs final-unit.mjs' ;;
+            guardrails) tests='lock-test.js budget.js sound.js swpush.js resume.js retro-unit.mjs pine-ref.mjs final-unit.mjs profile-unit.mjs' ;;
           esac
           mkdir -p /tmp/indai-results
           failed=0

@@ -5,8 +5,8 @@ const NOW = Date.parse('2026-11-19T18:00:00Z');
   const browser = await chromium.launch();
   for (const width of [360, 820, 1440]) {
     const context = await browser.newContext({ viewport: { width, height: 1100 }, hasTouch: width < 1000, isMobile: width < 700 });
-    const page = await context.newPage();
-    await page.clock.setFixedTime(new Date(NOW));
+    const page = await context.newPage(); page.setDefaultTimeout(20000);
+    await page.clock.install({time:new Date(NOW)});
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await installBackend(page, { ymd: '2026-11-19', minutes: 210 }, (request, json) => json(request.method() === 'GET' ? { configured: false, passcode: false } : { error: 'bad_key', message: 'Unknown profile key.' }, request.method() === 'GET' ? 200 : 400));
     await page.route('**/functions/v1/indai-market?*', async route => {
@@ -30,7 +30,7 @@ const NOW = Date.parse('2026-11-19T18:00:00Z');
     assert.equal(await page.textContent('#ch-chg'), '—');
     await page.click('#t-badge');
     assert.match(await page.textContent('#toast'), /TradingView, live/);
-    await page.clock.setFixedTime(new Date(NOW + 180000));
+    await page.clock.setSystemTime(new Date(NOW + 180000));
     await page.evaluate(() => { const a = window.__indai.app; a.views.top.render(); a.views.chart.render(); });
     assert.match(await page.textContent('#t-badge'), /TradingView, last candle/);
     assert.match(await page.textContent('#ch-note'), /TradingView, last candle/);
@@ -88,14 +88,14 @@ const NOW = Date.parse('2026-11-19T18:00:00Z');
     await page.click('#ch-tv');
     const frame = page.locator('#tv-frame');
     assert((await frame.getAttribute('sandbox')).includes('allow-scripts'));
-    assert(!(await frame.getAttribute('sandbox')).includes('allow-same-origin'));
-    assert((await frame.getAttribute('srcdoc')).includes('tv-advanced-chart'));
+    assert.equal(new globalThis.URL(await frame.getAttribute('src')).origin, 'https://www.tradingview-widget.com');
+    assert.equal(await frame.getAttribute('srcdoc'), null);
     assert.equal(await frame.getAttribute('credentialless'), '');
     await page.click('#tv-full');
     await page.waitForFunction(() => document.fullscreenElement || document.getElementById('chart-host').classList.contains('expanded'));
     await page.click('#tv-full');
     assert.deepEqual(errors, []);
-    console.log(`PASS ${width}px isolated TradingView component and full screen`);
+    console.log(`PASS ${width}px cross-origin TradingView frame and full screen`);
     await context.close();
   }
   await browser.close();

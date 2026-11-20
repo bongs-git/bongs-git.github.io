@@ -1,3 +1,4 @@
+const { quietFixture } = require('./browser.cjs');
 // Access lock and push registration against a mocked backend that follows the real one's rules:
 // with an owner passcode set, the brain (and push) refuse anyone without the x-indai-pass header.
 const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } = require('./lib.js');
@@ -16,7 +17,7 @@ const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } =
   };
   const newPage = async (ctxOpts = {}, init = null) => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, ...ctxOpts });
-    const page = await ctx.newPage(); const errs = [];
+    const page = await ctx.newPage(); await quietFixture(page); const errs = [];
     page.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
     page.on('console', m => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource|net::ERR|status of 401|status of 503/.test(m.text())) errs.push(m.type() + ' ' + m.text().slice(0, 200)); });
     if (init) await page.addInitScript(init);
@@ -111,7 +112,7 @@ const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } =
       const reg = { scope: location.origin + '/indai/', pushManager: { getSubscription: async () => sub, subscribe: async (o) => { window.__subOpts = { visible: o.userVisibleOnly, keyLen: o.applicationServerKey.length }; sub = { endpoint: 'https://web.push.apple.com/QAbc123', toJSON() { return { endpoint: this.endpoint, keys: { p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM', auth: 'tBHItJI5svbpez7KI4CCXg' } }; }, unsubscribe: async () => { sub = null; return true; } }; return sub; } } };
       Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { ready: Promise.resolve(reg), getRegistration: async () => reg, register: async () => reg, addEventListener() {}, controller: null } });
       window.PushManager = window.PushManager || function () {};
-      localStorage.setItem('indai.web.lock.v1', JSON.stringify({ required: true, ok: true }));
+      if (window !== window.top) return; localStorage.setItem('indai.web.lock.v1', JSON.stringify({ required: true, ok: true }));
       const st = JSON.parse(localStorage.getItem('jarvis.settings.v1') || '{}'); st.researchPass = 'open sesame 42'; localStorage.setItem('jarvis.settings.v1', JSON.stringify(st));
     };
     const { ctx, page, errs, A } = await newPage({ permissions: ['notifications'] }, stub);
@@ -133,7 +134,7 @@ const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } =
     await page.locator('#push-status').scrollIntoViewIfNeeded(); await sleep(200);
     await page.screenshot({ path: `${OUT}/push-settings.png` });
     await page.click('#s-push-test'); await sleep(900);
-    check('[push] test goes out', be.calls.push.includes('test') && /Test sent to 1 device/.test(await page.textContent('#toast')), JSON.stringify(await page.textContent('#toast')));
+    check('[push] test goes out', be.calls.push.includes('test') && /Test accepted for 1 device/.test(await page.textContent('#toast')), JSON.stringify(await page.textContent('#toast')));
     // a logged loss reaches the backend within seconds (so a tripped breaker stops pushes too)
     const n0 = be.calls.profile.length;
     await A(() => { const a = window.__indai.app; a.closeFocus(); a.logTrade(-25); });
@@ -150,7 +151,7 @@ const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } =
   }
   // ---- 4. iPhone in Safari (not installed): told to add to the Home Screen
   {
-    const { ctx, page, errs, A } = await newPage({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1' }, () => { localStorage.setItem('indai.web.lock.v1', JSON.stringify({ required: true, ok: true })); const st = JSON.parse(localStorage.getItem('jarvis.settings.v1') || '{}'); st.researchPass = 'open sesame 42'; localStorage.setItem('jarvis.settings.v1', JSON.stringify(st)); });
+    const { ctx, page, errs, A } = await newPage({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1' }, () => { if (window !== window.top) return; localStorage.setItem('indai.web.lock.v1', JSON.stringify({ required: true, ok: true })); const st = JSON.parse(localStorage.getItem('jarvis.settings.v1') || '{}'); st.researchPass = 'open sesame 42'; localStorage.setItem('jarvis.settings.v1', JSON.stringify(st)); });
     await page.goto(URL + '?nosw=1&nocheckin=1');
     await page.waitForFunction(() => window.__indai && window.__indai.app.feed.quote('SPY'), null, { timeout: 20000 }); await sleep(2200);
     await A(() => window.__indai.app.openSettings()); await sleep(1900);

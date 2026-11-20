@@ -13,10 +13,9 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
   return out; }
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
-  const n = minutesSoFar(); console.log('   minutes of session in the mock:', n);
-  if (n < 20) { console.log('   (market not open long enough right now for the morning-chart check; skipping)'); process.exit(0); }
+  const n = 90; console.log('   minutes of session in the mock:', n);
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
-  const page = await ctx.newPage(); const errs = []; page.on('pageerror', e => errs.push(e.message));
+  const page = await ctx.newPage(); await page.clock.install({time:new Date('2026-11-19T16:15:00Z')}); const errs = []; page.on('pageerror', e => errs.push(e.message));
   let drop = false; const seen = { snapshot: 0, dropped: 0 };
   await page.route('**://zptjziewsfuvfcogrikz.supabase.co/**', async (route) => {
     const req = route.request(), u = new globalThis.URL(req.url()), q = u.searchParams;
@@ -26,11 +25,11 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
     if (u.pathname.endsWith('/indai-market')) {
       const kind = q.get('kind'), syms = (q.get('symbols') || '').split(',').filter(s => PX[s]);
       if (kind === 'snapshot') { seen.snapshot++; return json({ quotes: syms.map(s => { const b = bars(s, n), c = b[b.length - 1][4]; return { symbol: s, ok: true, price: c, close: c, prevClose: PX[s] * 1.004, open: b[0][1], high: Math.max(...b.map(x => x[2])), low: Math.min(...b.map(x => x[3])), iv30: 19, timestamp: new Date().toISOString() }; }) }); }
-      if (kind === 'bars') return json({ bars: Object.fromEntries(syms.map(s => [s, { session: etYMD(new Date()), bars: bars(s, n) }])) });
+      if (kind === 'bars') return json({ bars: Object.fromEntries(syms.map(s => [s, { session: '2026-11-19', bars: bars(s, n) }])) });
       return json({ error: 'not in this mock' });
     }
     if (u.pathname.endsWith('/indai-tv')) return json(q.get('bars') ? { bars: [] } : { alerts: [] });
-    if (u.pathname.endsWith('/indai_gex_levels')) { const t = etYMD(new Date()); return json([{ ticker: 'QQQ', scope: 'A', asof_et: `${t} 08:46`, call_wall: 680, put_wall: 650, call_wall2: null, put_wall2: 670, gamma_flip: 670.47 }, { ticker: 'QQQ', scope: 'N', asof_et: `${t} 08:46`, expiry: t, call_wall: 680, put_wall: 664, gamma_flip: 670.47 }]); }
+    if (u.pathname.endsWith('/indai_gex_levels')) { const t = '2026-11-19'; return json([{ ticker: 'QQQ', scope: 'A', asof_et: `${t} 08:46`, call_wall: 680, put_wall: 650, call_wall2: null, put_wall2: 670, gamma_flip: 670.47 }, { ticker: 'QQQ', scope: 'N', asof_et: `${t} 08:46`, expiry: t, call_wall: 680, put_wall: 664, gamma_flip: 670.47 }]); }
     if (u.pathname.endsWith('/indai-brain')) return json({ configured: false });
     return json({});
   });

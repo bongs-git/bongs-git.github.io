@@ -1,3 +1,4 @@
+const { quietFixture } = require('./browser.cjs');
 // Runs the website against a mocked INDAI backend that follows the HANDOFF.md contract,
 // to exercise the real-data path and the "thinking brain" path (which the sandbox cannot reach for real).
 const { chromium } = require('./browser.cjs');
@@ -39,7 +40,7 @@ function chain(sym, spot, wantExp) {
   const calls = { talk: 0, trade: 0, mem: [] };
   for (const [name, w, h, mobile] of [['laptop', 1440, 900, false], ['phone', 390, 844, true]]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: mobile, isMobile: mobile });
-    const page = await ctx.newPage(); const errs = [];
+    const page = await ctx.newPage(); await quietFixture(page); const errs = [];
     page.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
     page.on('console', m => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource|net::ERR/.test(m.text())) errs.push(m.type() + ' ' + m.text().slice(0, 240)); });
     await page.route('**://zptjziewsfuvfcogrikz.supabase.co/**', async (route) => {
@@ -71,7 +72,7 @@ function chain(sym, spot, wantExp) {
     const logText = () => A(() => window.__indai.app.indai.log.map(m => m.text).join('\n'));
     const say = async (text, re, timeout = 15000) => { if (mobile && await A(() => window.__indai.app.tab !== 'indai' || !!window.__indai.app.focus)) { await A(() => { window.__indai.app.closeFocus(); window.__indai.app.ui.showTab('indai'); }); await sleep(200); } const before = (await logText()).length; await page.fill('#i-input', text); await page.press('#i-input', 'Enter'); const t0 = Date.now(); while (Date.now() - t0 < timeout) { const lt = (await logText()).slice(before); if (re.test(lt)) return lt; await sleep(120); } return (await logText()).slice(before); };
     const st = await A(() => { const a = window.__indai.app; return { mode: a.feed.status.mode, badge: document.getElementById('t-badge').textContent, lv: a.levelsFor('IWM'), q: a.feed.quote('IWM'), brain: a.indai.brain.configured, tv: a.tvAlerts.length, qqqLv: a.levelsFor('QQQ') && a.levelsFor('QQQ').source }; });
-    check(`[${name}] real-data mode with delayed badge`, st.mode === 'delayed' && /Delayed/.test(st.badge) && st.q && st.q.last > 0, JSON.stringify({ badge: st.badge, last: st.q && st.q.last, ext: st.q && st.q.ext }));
+    check(`[${name}] real-data mode with delayed badge`, st.mode === 'delayed' && /CBOE, delayed 15 min/.test(st.badge) && st.q && st.q.last > 0, JSON.stringify({ badge: st.badge, last: st.q && st.q.last, ext: st.q && st.q.ext }));
     check(`[${name}] morning GEX levels used for IWM, live chain levels for others`, st.lv && st.lv.source === 'morning' && st.lv.cw === 280 && st.lv.near && st.lv.near.cw === 279, JSON.stringify({ iwm: st.lv && st.lv.source, qqq: st.qqqLv }));
     check(`[${name}] thinking brain detected, TradingView alerts loaded`, st.brain === true && st.tv === 1);
     await page.screenshot({ path: `${OUT}/m-${name}-home.png` });

@@ -58,14 +58,14 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     check('[laptop] Reset view undoes both scales', !(await st(p)).manual);
     // TradingView in the panel
     await p.click('#ch-tv'); await sleep(300);
-    const tv1 = await p.evaluate(() => ({ shown: !document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('srcdoc'), label: document.getElementById('ch-tv-label').textContent, drawOff: document.getElementById('ch-draw').disabled, sym: window.__indai.app.settings.main, iv: window.__indai.app.settings.interval, out: document.getElementById('tv-out').href }));
-    check('[laptop] TradingView chart shows their chart for this ticker and candle size in the panel', tv1.shown && tv1.src.includes('tv-advanced-chart') && tv1.src.includes('symbol="' + tv1.sym + '"') && tv1.src.includes('interval="' + parseInt(tv1.iv) + '"') && tv1.src.includes('theme="dark"') && tv1.drawOff && tv1.label === 'INDAI chart' && tv1.out.includes(tv1.sym), { src: tv1.src.slice(0, 90) });
+    const tv1 = await p.evaluate(() => ({ shown: !document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('src'), label: document.getElementById('ch-tv-label').textContent, drawOff: document.getElementById('ch-draw').disabled, sym: window.__indai.app.settings.main, iv: window.__indai.app.settings.interval, out: document.getElementById('tv-out').href }));
+    check('[laptop] TradingView chart shows their chart for this ticker and candle size in the panel', tv1.shown && new globalThis.URL(tv1.src).origin === 'https://www.tradingview-widget.com' && JSON.parse(decodeURIComponent(new globalThis.URL(tv1.src).hash.slice(1))).symbol === tv1.sym && JSON.parse(decodeURIComponent(new globalThis.URL(tv1.src).hash.slice(1))).interval === String(parseInt(tv1.iv)) && tv1.drawOff && tv1.label === 'INDAI chart' && tv1.out.includes(tv1.sym), { src: tv1.src.slice(0, 90) });
     await p.click('#ch-next'); await sleep(500);
-    const tv2 = await p.evaluate(() => ({ src: document.getElementById('tv-frame').getAttribute('srcdoc'), sym: window.__indai.app.settings.main }));
-    check('[laptop] it follows the ticker', tv2.src.includes('symbol="' + tv2.sym + '"') && tv2.sym !== tv1.sym);
+    const tv2 = await p.evaluate(() => ({ src: document.getElementById('tv-frame').getAttribute('src'), sym: window.__indai.app.settings.main }));
+    check('[laptop] it follows the ticker', JSON.parse(decodeURIComponent(new globalThis.URL(tv2.src).hash.slice(1))).symbol === tv2.sym && tv2.sym !== tv1.sym);
     await p.click('#ch-prev'); await p.click('#ch-tv'); await sleep(400);
-    const tv3 = await p.evaluate(() => ({ hidden: document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('srcdoc'), drawOff: document.getElementById('ch-draw').disabled, geo: !!window.__indai.app.chart.geo }));
-    check('[laptop] INDAI chart brings the own chart back and unloads the frame', tv3.hidden && tv3.src === '' && !tv3.drawOff && tv3.geo);
+    const tv3 = await p.evaluate(() => ({ hidden: document.getElementById('tv-wrap').hidden, src: document.getElementById('tv-frame').getAttribute('src'), drawOff: document.getElementById('ch-draw').disabled, geo: !!window.__indai.app.chart.geo }));
+    check('[laptop] INDAI chart brings the own chart back and unloads the frame', tv3.hidden && tv3.src === 'about:blank' && !tv3.drawOff && tv3.geo);
     // drawing a trend line by dragging
     await p.click('#ch-draw'); await p.click('#ch-tools [data-tool="line"]');
     const s5 = await st(p);
@@ -121,7 +121,7 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     check('[laptop] the Delete key removes the selected line', (await st(p)).list.length === 0);
     await p.keyboard.press('Escape'); await sleep(100);
     const s16 = await st(p);
-    check('[laptop] Escape closes the drawing bar', !s16.drawing && s16.barHidden && s16.touch === '');
+    check('[laptop] Escape closes the drawing bar', !s16.drawing && s16.barHidden && s16.touch === 'about:blank');
     // scrolling back into earlier sessions
     const h0 = await p.evaluate(() => { const g = window.__indai.app.chart.geo; return { H: g.H, full: g.full, max: g.maxSlots }; });
     const Bh = await box(p), hx = Bh.x + Bh.w * 0.4, hy = Bh.y + Bh.h * 0.5;
@@ -185,7 +185,7 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     check('[phone] then a finger moves the chart up and down too', pb.lo > pa.lo);
     await p.tap('#ch-reset'); await sleep(250);
     const pc = await st(p);
-    check('[phone] Reset view fits it again and gives page scrolling back', !pc.manual && pc.touch === '');
+    check('[phone] Reset view fits it again and gives page scrolling back', !pc.manual && pc.touch === 'about:blank');
     // draw with a finger
     await p.tap('#ch-draw'); await p.tap('#ch-tools [data-tool="line"]'); await sleep(150);
     const B1 = await box(p);
@@ -206,7 +206,7 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     await p.tap('#ch-clear'); await sleep(150);
     check('[phone] Clear all removes them', (await st(p)).list.length === 0);
     await p.tap('#ch-draw'); await sleep(150);
-    check('[phone] closing Draw gives page scrolling back to the chart', (await st(p)).touch === '');
+    check('[phone] closing Draw gives page scrolling back to the chart', (await st(p)).touch === 'about:blank');
     check('[phone] no page errors', errs.length === 0, errs.slice(0, 2));
     await ctx.close();
   }

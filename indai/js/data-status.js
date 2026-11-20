@@ -9,7 +9,7 @@ const timestamp = (value) => typeof value === 'number' ? value : Date.parse(valu
 
 export function unavailableReason(error) {
   const message = String(error?.message || error || '');
-  if (/403|forbidden|refus|upstream/i.test(message)) return 'The options provider is refusing the request.';
+  if (/403|forbidden|refus/i.test(message)) return 'The options provider is refusing the request.';
   if (/429|rate/i.test(message)) return 'The options provider has reached its request limit.';
   if (/abort|timeout/i.test(message)) return 'The options provider took too long to respond.';
   if (/offline|fetch|network/i.test(message)) return 'The options service could not be reached.';

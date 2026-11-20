@@ -1,3 +1,4 @@
+const { quietFixture } = require('./browser.cjs');
 // Trade ideas: the strip, the new-idea card, the list, the chart focus, short speech, quiet (over the limit) ideas,
 // what happened since, forming setups, catch-up of missed ideas and keeping the day's list across reloads.
 const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } = require('./lib.js');
@@ -6,8 +7,8 @@ const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } =
   // ---------------------------------------------------------------- A. demo data
   for (const [name, w, h, mobile] of [['phone', 390, 844, true], ['tablet', 820, 1180, true], ['laptop', 1440, 900, false]]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: mobile, isMobile: mobile && w < 700 });
-    const page = await ctx.newPage(); const errs = [];
-    await page.clock.setFixedTime(new Date('2026-11-19T18:00:00Z'));
+    const page = await ctx.newPage(); await quietFixture(page); const errs = [];
+    await page.clock.install({time:new Date('2026-11-19T18:00:00Z')});
     page.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
     page.on('console', m => { if ((m.type() === 'error' || m.type() === 'warning') && !/Failed to load resource|net::ERR/.test(m.text())) errs.push(m.type() + ' ' + m.text().slice(0, 240)); });
     await page.goto(URL + '?demo=1&nosw=1&nocheckin=1');
@@ -119,8 +120,8 @@ const { chromium, OUT, URL, sleep, check, state, lastSession, installBackend } =
   {
     const sess = { ymd: '2026-11-19', minutes: 210 };
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    const page = await ctx.newPage(); const errs = [];
-    await page.clock.setFixedTime(new Date('2026-11-19T18:00:00Z'));
+    const page = await ctx.newPage(); await quietFixture(page); const errs = [];
+    await page.clock.install({time:new Date('2026-11-19T18:00:00Z')});
     page.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
     await installBackend(page, sess, async (req, json) => req.method() === 'GET' ? json({ configured: false }) : json({ error: 'not_configured' }, 503));
     const boot = async () => { await page.goto(URL + '?nosw=1&nocheckin=1'); await page.waitForFunction(() => window.__indai && window.__indai.app.feed.status.mode === 'delayed' && window.__indai.app.feed.getBars('IWM', '5min').length > 5, null, { timeout: 20000 }); };

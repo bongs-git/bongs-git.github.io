@@ -81,3 +81,29 @@ Headset-only calls are answered politely instead of doing anything: `setScene`, 
 - Thinking budget care (`demo.js`): when the backend answers `429 budget` (or `rate_limited`), she says once in plain words that today's thinking budget is used up until midnight New York time, then keeps working with built-in commands and market-data ratings, with no "couldn't reach my thinking brain" plus "I heard …" pair. She checks again every five minutes, or at once from Settings. Web research that fails twice in a row on the backend (`502 parse` / `upstream`, or a timeout) pauses itself until midnight New York time, because each failed try still spends the budget; Settings has "Turn web research back on".
 - Being heard on a phone (`app.js`, no change to `voice.js`): on iPhone and iPad the audio session is set to `playback` so the ring/silent switch does not mute her (a looping silent clip does the same on older iOS), and to `play-and-record` only while the mic is open. The mic is released the moment listening ends instead of 25 seconds later, because iOS plays everything at quiet call volume while it is open. The audio engine is woken on every tap and on coming back to the app (`interrupted`, or `running` with a stalled clock). The phone's own voice is unlocked by the first tap. If the natural voice takes more than about 3.5 seconds to start talking twice in a row on a phone, she uses the phone's own voice for the rest of the visit and says so. Settings shows a Sound line with all of this.
 - Safari and iOS always listen with the on-device model on WebAssembly (no browser speech recognition, no WebGPU), unless "Browser speech recognition" is picked in Settings.
+
+## Website final touches — November 20, 2026
+
+Website-only adapters preserve the shared files above. `data-status.js` retains relay source/delay metadata for
+per-ticker price badges, tap explanations and chart labels. A bridge candle is called live only while it is under
+two minutes old. Unknown previous close is shown as an em dash; failed option chains are explained in the
+calculator, verdict, levels and idea contract card.
+
+`draw.js` now supports undo, horizontal rays, rectangles and cancelled-gesture rollback. `chart.js` adds a
+long-press magnifier and earlier-session time labels. History loading/end messages do not reset a scrolled view.
+TradingView uses its vendor-hosted Advanced Chart inside a credentialless, cross-origin sandboxed iframe;
+third-party code never executes in the app's origin. The new Web Component was tested in an opaque srcdoc
+frame but failed on cookie access, so it is not shipped. The hosted embed can use its own origin's storage. Full screen has a CSS fallback and an external chart link.
+Actual third-party rendering and iPhone silent-ring speech/closed-app push remain device release checks.
+
+`profile-sync.js` serializes local changes and retains pending work across visits. Drawing profiles use
+`{version:1, items:{[id]:drawingOrTombstone}}` with per-item `symbol` and `updatedAt` milliseconds.
+Tuning uses `{version:1, adj, minAdd, stop, target, at, basis}`. The current backend rejects both profile keys
+(`drawings`, `tuning`); Settings says that work is saved locally pending backend support. Do not claim cloud
+sync until the backend accepts them. Drawings require an atomic per-ID merge (latest timestamp, tombstone
+wins ties), not whole-profile replacement. Tuning requires latest-`at` selection, including reset records.
+These backend requests belong to Ikpa. Schwab order submission awaits a written backend contract.
+
+Push receipts persist locally in a separate Cache API cache. Delay is measured from the completed five-minute
+candle's close (`barT + 300000`) to service-worker receipt, not notification click; test notifications do not
+overwrite the last market alert. Settings also reports the test endpoint's accepted-device count.

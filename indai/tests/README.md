@@ -19,3 +19,19 @@ node pine-ref.mjs         # the TradingView strategy's logic against the app's s
 Every test prints PASS or FAIL lines and ends with ALL PASSED. They load the site with `?demo=1` or a mocked
 backend, so they need no keys. Paths at the top of a few files (`retro-unit.mjs`, `pine-ref.mjs`) point at a checkout
 of both repositories side by side under `/home/claude`; change them to yours. Screenshots are written next to the tests.
+
+
+## Portable regression checks (November 20)
+
+The PR workflow runs the browser checks in three groups and retains logs/screenshots as Actions artifacts.
+Set `INDAI_TEST_URL` to a different local preview base (including its trailing slash); set `CHROMIUM_PATH`
+only when using a system Chromium. Tests use an isolated backend fixture by default, never an owner token.
+Individual fixtures override that default. The catch-up test fixes the clock inside a trading session, including
+when CI runs before the open.
+
+`final-touches.js` covers fresh/stale metadata, missing previous close, options failure messages, drawing
+operations, history states, layout at 360/820/1440px, unsupported sync keys and iframe isolation/full screen.
+`final-unit.mjs` covers drawing merge/tombstones, cancellation and source labels. `profile-unit.mjs` covers
+queued profile saves, offline retries and edits arriving during a request. TradingView network calls use a static vendor-frame fixture; origin isolation and controls are checked.
+These fixture checks do not certify
+TradingView's live service or real iPhone sound/push delivery.

@@ -677,3 +677,5 @@ body.typing { --tab-h: 0px; --sab: 0px; --ideas-h: 0px; }
 .tv-full { position: absolute; top: 8px; right: 8px; z-index: 2; }
 .chart-host:fullscreen, .chart-host.expanded { height: 100dvh; width: 100vw; background: var(--ink); }
 .chart-host.expanded { position: fixed; inset: 0; z-index: 1000; }
+
+.tv-out { z-index: 2; max-width: calc(100% - 16px); }
