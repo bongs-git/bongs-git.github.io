@@ -54,6 +54,17 @@ const NOW = Date.parse('2026-11-19T18:00:00Z');
     assert.equal(drawings.at(-1).type, 'rect');
     await page.click('#ch-undo');
     assert.equal(await page.evaluate(() => (JSON.parse(localStorage.getItem('indai.web.draw.v1')).IWM || []).length), 0);
+    if (width < 1000) {
+      await page.click('#ch-tools [data-tool="level"]');
+      const touch = await context.newCDPSession(page);
+      await touch.send('Input.dispatchTouchEvent', {type:'touchStart',touchPoints:[{x:x+30,y:y+20,id:1}]});
+      await page.locator('.chart-magnifier').waitFor({state:'visible'});
+      await touch.send('Input.dispatchTouchEvent', {type:'touchCancel',touchPoints:[]});
+      await page.locator('.chart-magnifier').waitFor({state:'hidden'});
+      assert.equal(await page.evaluate(() => (JSON.parse(localStorage.getItem('indai.web.draw.v1')).IWM || []).length), 0);
+      await touch.detach();
+      console.log(`PASS ${width}px long-press magnifier and cancelled touch rollback`);
+    }
     await page.click('#ch-tools [data-tool="ray"]');
     await page.mouse.click(x + 35, y + 25);
     drawings = await page.evaluate(() => JSON.parse(localStorage.getItem('indai.web.draw.v1')).IWM);
