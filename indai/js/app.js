@@ -24,6 +24,7 @@ import { initDataStatus } from './data-status.js';
 import { initTimeframes, feedInterval, TF_MS, TF_WORDS, tfFromWords } from './timeframes.js';
 import { initDaily } from './daily.js';
 import { initCapture } from './capture.js';
+import { initOwnerFeed } from './owner-feed.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
@@ -64,6 +65,7 @@ const app = {
 };
 app.levels = parseLevels(app.settings.levelsText);
 app.feed = new MarketFeed(app.settings);
+initOwnerFeed(app);
 installRelayGuards(app);
 initDataStatus(app);
 app.indai = new Indai(app);
