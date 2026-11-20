@@ -146,7 +146,9 @@ export function initExtended(app) {
   // its candle instead, and the regular close stays where it is. Regular-hours trades go on as before.
   const applyTrade = app.feed.applyTrade.bind(app.feed);
   app.feed.applyTrade = (sym, price, vol, t, opts) => {
-    if (demo() || regularAt(t)) return applyTrade(sym, price, vol, t, opts);
+    if (demo()) return applyTrade(sym, price, vol, t, opts);
+    if (price > 0) entry(sym).tickAt = Date.now();
+    if (regularAt(t)) return applyTrade(sym, price, vol, t, opts);
     if (!(price > 0) || !extKind(t)) return;
     const e = entry(sym), minute = Math.floor(t / 60e3) * 60e3, have = e.at.get(minute);
     if (have) { have.h = Math.max(have.h, price); have.l = Math.min(have.l, price); have.c = price; have.v += vol || 0; e.rev++; }
@@ -158,6 +160,38 @@ export function initExtended(app) {
     s.ext = price; s.lastTradeAt = Date.now(); s.tvAt = Date.now(); // tvAt: a fresher extended-hours price than the delayed snapshot's
     app.feed.bump(s);
     app.markDirty('chart');
+  };
+
+  // The candle that is still forming, from the bridge's updates between candle closes (`live` in the bridge feed's
+  // answer). During the session it moves the last price and this minute's candle; outside it, the extended-hours
+  // price and candle. It is passed over when it is old, when its minute has already closed, or when live trades
+  // are arriving and already say more. True when it was used.
+  app.ext.live = (row, serverNow, closed = 0) => {
+    if (demo() || !row) return false;
+    const sym = row.ticker, t = +row.t, c = +row.c, at = Date.parse(row.received_at), now = +serverNow || Date.now();
+    if (!sym || !app.feed.syms.has(sym) || !(c > 0) || !(t > closed) || !(now - at < 45e3) || !(now - t < 80e3)) return false;
+    const e = entry(sym);
+    if (e.liveAt === at) return false; // this update is already in
+    e.liveAt = at;
+    if (Date.now() - (e.tickAt || 0) < 5000) return false; // trades from the last seconds are newer than this
+    const o = +row.o || c, h = Math.max(+row.h || c, c), l = Math.min(+row.l || c, c), v = +row.v || 0, s = app.feed.sym(sym);
+    if (regularAt(t)) {
+      const arr = s.bars['1min'], had = arr.length && arr[arr.length - 1].t === t;
+      applyTrade(sym, c, 0, Math.max(t, Math.min(Date.now(), t + 59e3)), s.cboeBars ? { updateIntervals: ['1min'] } : undefined);
+      const bar = arr[arr.length - 1];
+      if (bar && bar.t === t) { // the candle so far, as the bridge has it
+        if (!had) bar.o = o;
+        bar.h = Math.max(bar.h, h); bar.l = Math.min(bar.l, l);
+        if (v) bar.v = Math.max(bar.v, Math.round(v * app.feed.bridgeVolScale(s)));
+      }
+      s.high = s.high == null ? h : Math.max(s.high, h); s.low = s.low == null ? l : Math.min(s.low, l);
+    } else if (extKind(t)) {
+      settle(e, put(e, { t, o, h, l, c, v }));
+      s.ext = c; s.lastTradeAt = Date.now();
+    } else return false;
+    s.tvAt = Date.now(); // a fresher price than the delayed snapshot's
+    app.feed.bump(s);
+    return true;
   };
 
   // The line under the price. Outside regular hours: "Pre-market 635.43  -9.61  -1.49%", measured from the regular

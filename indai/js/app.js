@@ -281,26 +281,47 @@ async function pollTradingView() {
 }
 // Live candles from the INDAI Bridge indicator running in your TradingView account.
 let bridgeSince = 0;
-let bridgeGot = 0;
-// TradingView posts each one-minute candle a few seconds after the minute turns. While the bridge is live, look every
-// 2.5 seconds from then until that candle is in (so a setup shows within seconds of its candle closing), and every
-// 8 seconds the rest of the time.
+let bridgeGot = 0;            // when something new last arrived (a finished candle or an update of the forming one)
+let bridgeSeen = '';          // the backend's cursor: sent back, so the answer holds only what was stored since
+let bridgeLiveAt = 0;         // when an update of the forming candle last arrived
+const bridgeHave = new Map(); // ticker|time|size -> when that candle was stored, so one sent twice counts once
+const bridgeClosed = new Map(); // ticker -> its newest finished one-minute candle
+// How long to wait before looking again. The backend only sends what is new, so "something arrived" is known exactly.
+// With updates of the forming candle (about every 15 seconds): rest after one, then look every 1.5 seconds from
+// shortly before the next is due until it is in; if they stop, every 4 seconds.
+// With finished candles only: TradingView posts each a few seconds after the minute turns, so look every 2.5 seconds
+// from then until it is in (a setup shows within seconds of its candle closing), and every 8 seconds otherwise.
 function bridgeGap() {
   if (marketStatus().state === 'closed') return 60000;
-  const now = Date.now(), sec = (now / 1000) % 60, since = now - bridgeGot;
-  const waiting = app.feed.bridgeLive && sec >= 1.5 && sec < 30 && since > sec * 1000;     // this minute's candles are not in yet
-  return waiting || since < 6000 ? 2500 : 8000;                                            // one ticker's candle in: the others follow
+  const now = Date.now(), sec = (now / 1000) % 60, quiet = now - bridgeGot;
+  if (now - bridgeLiveAt < 150e3) return quiet < 12500 ? 12500 : quiet < 27000 ? 1500 : 4000;
+  const waiting = app.feed.bridgeLive && sec >= 1.5 && sec < 30 && quiet > sec * 1000;     // this minute's candles are not in yet
+  return waiting || quiet < 6000 ? 2500 : 8000;                                            // one ticker's candle in: the others follow
 }
+app.bridgePace = () => ({ gap: bridgeGap(), live: Date.now() - bridgeLiveAt < 150e3, seen: bridgeSeen });
 async function pollBridge() {
   if (app.feed.status.mode === 'demo') return;
-  let j; try { j = await relay.tvBars(bridgeSince); } catch { return; }
+  // relay.js is shared with the headset and only knows `since`; the cursor rides along in the same place
+  let j; try { j = await relay.tvBars(bridgeSince + (bridgeSeen ? '&seen=' + encodeURIComponent(bridgeSeen) : '')); } catch { return; }
+  if (typeof j.cursor === 'string') bridgeSeen = j.cursor;
   const rows = j.bars || [];
+  let fresh = 0;
   for (const b of rows) {
     const sym = b.ticker; if (!sym) continue;
-    app.feed.applyBridgeBar(sym, { t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v }, b.tf || '1');
     bridgeSince = Math.max(bridgeSince, +b.t - 1);
+    const tf = b.tf || '1', key = sym + '|' + b.t + '|' + tf;
+    if (b.received_at && bridgeHave.get(key) === b.received_at) continue;   // the same candle, sent again while it was new
+    bridgeHave.set(key, b.received_at || ''); fresh++;
+    app.feed.applyBridgeBar(sym, { t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v }, tf);
+    if (tf === '1') bridgeClosed.set(sym, Math.max(bridgeClosed.get(sym) || 0, +b.t));
   }
-  if (rows.length) { bridgeGot = Date.now(); scanSoon(); }
+  if (bridgeHave.size > 6000) bridgeHave.clear();
+  // the candle that is still forming: the price and that candle move between closes
+  let moved = 0;
+  for (const b of j.live || []) if (app.ext.live(b, j.now, bridgeClosed.get(b.ticker) || 0)) moved++;
+  if (moved) bridgeLiveAt = Date.now();
+  if (fresh || moved) bridgeGot = Date.now();
+  if (fresh) scanSoon();
   if (rows.length && !app.bridgeAnnounced && app.feed.bridgeLive) { app.bridgeAnnounced = true; say('TradingView bridge connected. Charts and setup alerts are now on your live TradingView candles.', 'good', { speak: false }); }
 }
 app.openTradingView = (sym) => {

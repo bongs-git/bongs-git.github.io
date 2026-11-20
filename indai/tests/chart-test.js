@@ -1,6 +1,6 @@
 // Moving, zooming and drawing on the main chart, with a mouse (laptop) and with touch (phone).
 const { chromium } = require('./browser.cjs');
-const URL = (process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/') + '?demo=1';
+const URL = (process.env.INDAI_TEST_URL || 'http://127.0.0.1:8765/indai/') + '?demo=1&nocheckin=1';   // the automatic morning check-in would otherwise cover the chart from 6 AM New York time
 let failed = 0;
 const check = (label, ok, extra = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'} ${label} ${extra === '' ? '' : JSON.stringify(extra)}`); };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
