@@ -142,7 +142,7 @@ const box = (p) => p.evaluate(() => { const r = document.getElementById('chart-h
     const c = await p.evaluate(() => { const c = window.__indai.app.capture.current(); return { status: c.status, read: c.read, notable: c.r && c.r.notable.length, atlas: (c.atlas || []).length, text: document.getElementById('sb-capture').innerText }; });
     const label = modes.length ? '[server with capture and atlas]' : '[server today]';
     if (!modes.length) {
-      check(`${label} the read comes from the conversation brain, without web search and in its own session`, c.status.read === 'done' && /upward tilt/.test(c.text) && asked.some(a => a.mode === 'talk' && a.search === false && a.session === 'capture' && a.capture), asked);
+      check(`${label} the read comes from the conversation brain, without web search and in its own session`, c.status.read === 'done' && /upward tilt/.test(c.text) && asked.some(a => a.mode === 'talk' && a.search === false && /^capture-\d+$/.test(a.session) && a.capture), asked);
       check(`${label} nothing is sent in a mode the server does not list`, !asked.some(a => a.mode === 'capture' || a.mode === 'atlas'), asked);
       check(`${label} the atlas odds are promised for later, not made up`, c.notable === 0 || /once INDAI's atlas service is switched on/.test(c.text));
     } else {

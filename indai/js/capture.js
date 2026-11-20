@@ -87,7 +87,8 @@ export function initCapture(app) {
     try {
       let res;
       if (modes.includes('capture')) res = await relay.brain({ mode: 'capture', name: app.settings.name, symbol: c.shot.sym, timeframe: c.shot.tf, image: c.shot.image, capture: summary, question }, pass);
-      else res = await relay.brain({ mode: 'talk', name: app.settings.name, question, history: [], search: false, session: 'capture', context: { capture: brief(summary), note: 'Computed on the device from the candles inside the box. The atlas numbers are not attached here.' } }, pass);
+      // Each capture gets its own conversation, so INDAI does not mix in what it said about an earlier box.
+      else res = await relay.brain({ mode: 'talk', name: app.settings.name, question, history: [], search: false, session: `capture-${c.id}`, context: { capture: brief(summary), note: 'Computed on the device from the candles inside the box. The atlas numbers are not attached here.' } }, pass);
       const out = res && res.result ? res.result : {};
       c.read = { spoken: out.spoken || out.headline || '', summary: Array.isArray(out.summary) ? out.summary.slice(0, 6) : [], by: modes.includes('capture') ? 'picture' : 'facts' };
       // an answer cut off at the brain's length limit comes back empty
