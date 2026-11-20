@@ -206,14 +206,17 @@ export function initViews(app) {
       setText(chg, q && app.marketData.changeKnown(sym) ? `${q.chg >= 0 ? '+' : ''}${q.chg.toFixed(2)}  ${fmtPct(q.pct)}` : '—');
       setClass(chg, 'mono chg ' + (q && app.marketData.changeKnown(sym) ? cls(q.chg) : 'flat'));
       setText($('ch-hl'), q && q.high != null ? `H ${fmtPrice(q.high)}  L ${fmtPrice(q.low)}${q.ext != null ? `  ext ${fmtPrice(q.ext)}` : ''}` : ' ');
-      for (const b of $('ch-tf').children) b.classList.toggle('on', b.dataset.iv === s.interval);
+      const tfNow = app.tf ? app.tf.current() : s.interval;
+      for (const b of $('ch-tf').children) { const on = b.dataset.iv === tfNow; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
       for (const b of $('ch-show').children) { const on = !!s.show[b.dataset.show]; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); }
       const note = $('ch-note'), mode = app.feed.status.mode;
       setText(note, mode === 'demo' ? 'Demo data, not real prices' : app.marketData.label(sym, 'bars').text);
       setClass(note, 'chart-note' + (mode === 'demo' ? '' : ' quiet'));
       if (tvOn) syncTv(); else chart.draw();
-      const history = app.history?.state(sym), edge = chart.view && chart.view.first <= -(chart.geo?.H || 0) + 1;
-      const historyText = !tvOn && history ? history.busy ? 'Loading earlier candles…' : history.failedAt && edge ? 'Earlier candles could not load. Retrying…' : history.done && edge ? 'That is all INDAI has stored' : '' : '';
+      const history = app.tf ? app.tf.state(sym, tfNow) : app.history?.state(sym), edge = chart.geo && chart.geo.first <= -(chart.geo.H || 0) + 1;
+      const historyText = !tvOn && history ? history.daily
+        ? (history.busy ? 'Loading daily candles…' : history.failedAt && !history.candles ? 'Daily candles could not load. Retrying…' : history.done && edge ? `That is all the daily history INDAI has${history.source ? ` (${history.source})` : ''}` : '')
+        : history.busy ? 'Loading earlier candles…' : history.failedAt && edge ? 'Earlier candles could not load. Retrying…' : history.done && edge ? 'That is all INDAI has stored' : '' : '';
       setText($('ch-history'), historyText); $('ch-history').hidden = !historyText;
     },
   };
@@ -232,7 +235,9 @@ export function initViews(app) {
     $('ch-undo').disabled = !st.undo;
     $('ch-clear').disabled = !st.count;
     $('ch-reset').hidden = !st.manual;
-    setText($('ch-hint'), st.tool === 'rect' ? (st.pending ? 'Tap the opposite corner.' : 'Drag between opposite corners, or tap each corner. Hold to magnify.')
+    $('ch-analyze').classList.toggle('on', st.tool === 'capture'); $('ch-analyze').setAttribute('aria-pressed', st.tool === 'capture');
+    setText($('ch-hint'), st.tool === 'capture' ? 'Drag a box around the candles you want read. A tap (or Analyze again) reads the whole chart.'
+      : st.tool === 'rect' ? (st.pending ? 'Tap the opposite corner.' : 'Drag between opposite corners, or tap each corner. Hold to magnify.')
       : st.tool === 'line' ? (st.pending ? 'Now tap where the line ends.' : 'Drag on the chart, or tap where the line starts and then where it ends.')
       : st.tool === 'ray' ? 'Tap the start of a horizontal ray. Hold to magnify.'
       : st.tool === 'level' ? 'Tap the price for the level.'
@@ -240,6 +245,8 @@ export function initViews(app) {
       : st.count ? 'Tap a drawing to move or delete it.' : 'Pick a drawing tool, then draw on the chart.');
   };
   $('ch-draw').addEventListener('click', () => chart.setDrawing(!chart.drawing));
+  // Analyze: the first tap picks up the Capture box; a second tap reads the whole chart instead
+  $('ch-analyze').addEventListener('click', () => { if (tvOn) app.showTradingView(false); if (chart.tool === 'capture') chart.analyzeView(); else chart.setTool('capture'); });
   $('ch-tools').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) chart.setTool(b.dataset.tool); });
   $('ch-undo').addEventListener('click', () => chart.undo());
   $('ch-del').addEventListener('click', () => chart.deleteSelected());
@@ -255,9 +262,10 @@ export function initViews(app) {
   // TradingView's own chart, embedded in the panel in place of INDAI's (their free chart widget: full history, their
   // drawing tools and indicators, but not signed in to the trader's account). It lives in a frame from their site.
   let tvOn = false, tvKey = '';
-  const TV_IV = { '1min': '1', '5min': '5', '15min': '15' };
+  const TV_IV = { '1min': '1', '5min': '5', '15min': '15', '30min': '30', '1h': '60', '4h': '240', '1D': 'D', '1W': 'W' };
+  const tvIv = () => (app.tf ? app.tf.current() : app.settings.interval);
   const syncTv = () => {
-    const s = app.settings, host = $('chart-host'), frame = $('tv-frame'), key = tvOn ? s.main + '|' + s.interval : '';
+    const s = app.settings, host = $('chart-host'), frame = $('tv-frame'), key = tvOn ? s.main + '|' + tvIv() : '';
     host.classList.toggle('tv', tvOn);
     $('tv-wrap').hidden = !tvOn;
     $('ch-tv').classList.toggle('on', tvOn); $('ch-tv').setAttribute('aria-pressed', tvOn);
@@ -270,7 +278,7 @@ export function initViews(app) {
     // in an opaque srcdoc sandbox. Vendor scripts remain cross-origin from INDAI and its token.
     const next = frame.cloneNode(false);
     next.src = tvOn ? 'https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=en#' + encodeURIComponent(JSON.stringify({
-      symbol: s.main, interval: TV_IV[s.interval] || '5', timezone: 'America/New_York', theme: 'dark', style: '1',
+      symbol: s.main, interval: TV_IV[tvIv()] || '5', timezone: 'America/New_York', theme: 'dark', style: '1',
       allow_symbol_change: true, hide_side_toolbar: false, withdateranges: true, save_image: false,
       autosize: true, width: '100%', height: '100%', support_host: 'https://www.tradingview.com',
     })) : 'about:blank';

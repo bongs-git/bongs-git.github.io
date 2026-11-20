@@ -700,3 +700,53 @@ body.typing { --tab-h: 0px; --sab: 0px; --ideas-h: 0px; }
 @media (min-width: 700px) {
   .chart-host.tv:not(:fullscreen):not(.expanded) { height: 100%; min-height: 0; }
 }
+
+/* ---------- timeframes up to weekly, Analyze and Capture ---------- */
+#ch-tf { max-width: 100%; }
+@media (max-width: 640px) {
+  /* eight candle sizes get a line of their own on a phone; the overlay switches, Draw and Analyze share the next */
+  #ch-tf { flex: 1 0 100%; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  #ch-tf button { min-width: 0; padding: 0; min-height: 34px; }
+  /* the extra line of candle sizes comes out of the chart's height, so the chart still ends where it did */
+  .chart-host { height: clamp(250px, calc(100dvh - 446px), 520px); }
+}
+#ch-analyze { flex: none; color: var(--gold); border-color: rgba(220,191,110,.45); }
+#ch-analyze.on { background: var(--gold-soft); }
+@media (max-width: 380px) { #ch-analyze span { display: none; } #ch-analyze { width: 40px; padding: 0; justify-content: center; } }
+#ch-tools .t-capture { color: var(--gold); }
+#ch-tools .t-capture.on { background: var(--gold-soft); }
+.cap-shot { display: block; width: 100%; max-height: 300px; object-fit: contain; background: #050709; border: 1px solid var(--line2); border-radius: 6px; margin: 0 0 10px; }
+.cap-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; }
+.cap-lean { font-weight: 700; font-size: 15px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line2); color: var(--text); }
+.cap-lean.up { color: var(--up); border-color: rgba(62,207,142,.5); background: rgba(62,207,142,.08); }
+.cap-lean.down { color: var(--down); border-color: rgba(242,112,107,.5); background: rgba(242,112,107,.08); }
+.cap-meta { font-size: 12.5px; color: var(--dim); }
+.cap-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.cap-list li { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+.cap-row { display: flex; align-items: center; gap: 8px; }
+.cap-row b { font-size: 14px; }
+.cap-side { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+.cap-side.up { color: var(--up); } .cap-side.down { color: var(--down); }
+.cap-sub { font-size: 12.5px; color: var(--dim); line-height: 1.45; margin-top: 3px; }
+.cap-nums { font-family: var(--mono); color: var(--text); }
+.cap-light { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line2); }
+.cap-light.good { color: var(--up); border-color: rgba(62,207,142,.6); } .cap-light.alert { color: var(--amber); border-color: rgba(240,179,74,.6); } .cap-light.risk { color: var(--down); border-color: rgba(242,112,107,.6); }
+.cap-paths { display: grid; gap: 8px; margin: 0 0 10px; }
+@media (min-width: 700px) { .cap-paths { grid-template-columns: repeat(3, 1fr); } }
+.cap-path { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 13px; line-height: 1.45; }
+.cap-path b { display: block; margin-bottom: 2px; }
+.cap-path p { margin: 0; color: var(--dim); }
+.cap-path.up { border-color: rgba(62,207,142,.4); } .cap-path.up b { color: var(--up); }
+.cap-path.down { border-color: rgba(242,112,107,.4); } .cap-path.down b { color: var(--down); }
+.cap-tfs { display: grid; gap: 8px; margin: 0 0 12px; }
+.cap-tf { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center; text-align: left; border: 1px solid var(--line2); border-radius: 6px; padding: 8px 10px; background: var(--raised, transparent); color: var(--text); }
+.cap-tf b { font: 700 15px var(--mono); color: var(--gold); text-align: center; }
+.cap-tf span { font-size: 12.5px; color: var(--dim); line-height: 1.4; }
+.cap-past { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.cap-old { display: grid; gap: 6px; text-align: left; border: 1px solid var(--line); border-radius: 6px; padding: 6px; color: var(--text); font-size: 12px; line-height: 1.35; }
+.cap-old img { width: 100%; height: 70px; object-fit: cover; border-radius: 4px; background: #050709; }
+.cap-old span { color: var(--dim); } .cap-old b { color: var(--text); }
+.flash-capture { animation: cap-flash .35s ease-out; }
+@keyframes cap-flash { from { box-shadow: inset 0 0 0 9999px rgba(220,191,110,.22); } to { box-shadow: inset 0 0 0 9999px rgba(220,191,110,0); } }
+#sb-capture .sec-title { margin-top: 16px; }
+#sb-capture .cap-shot + .cap-head { margin-top: 0; }

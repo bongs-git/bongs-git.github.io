@@ -217,8 +217,9 @@ const look = (page) => page.evaluate(() => {
       await phone.page.evaluate(() => document.querySelector('nav [data-tab="chart"], button[data-tab="chart"]').click()); await sleep(600);
       const p = await look(phone.page);
       const fit = await phone.page.evaluate(() => { const q = document.querySelector('.quote'), x = document.getElementById('ch-ext'), t = document.querySelector('.chart-tools'), d = document.getElementById('ch-draw'), f = document.getElementById('ch-tf');
-        return { over: document.documentElement.scrollWidth - innerWidth, lineInside: x.getBoundingClientRect().right <= q.getBoundingClientRect().right + 1 && x.scrollWidth <= x.clientWidth + 1, oneLine: Math.abs(d.getBoundingClientRect().top - f.getBoundingClientRect().top) < 12 && t.scrollWidth <= t.clientWidth + 1 }; });
+        return { over: document.documentElement.scrollWidth - innerWidth, lineInside: x.getBoundingClientRect().right <= q.getBoundingClientRect().right + 1 && x.scrollWidth <= x.clientWidth + 1, oneLine: Math.abs(d.getBoundingClientRect().top - document.getElementById('ch-show').getBoundingClientRect().top) < 12 && f.scrollWidth <= f.clientWidth + 1 && t.scrollWidth <= t.clientWidth + 1 }; });
       check('[phone] after the close: after-hours candles, with the newest in view', p.X === 21 && p.kinds === 'post' && p.line.startsWith('After hours ') && p.first + p.slots >= p.full + p.X, p);
+      // the candle sizes have a line of their own on a phone (eight of them); the switches and Draw stay on one line under it
       check('[phone] the new line and the Ext switch fit: nothing scrolls sideways and the tools stay on one line', fit.over <= 0 && fit.lineInside && fit.oneLine, fit);
       await phone.page.screenshot({ path: __dirname + '/ext-phone.png' });
       await phone.ctx.close();

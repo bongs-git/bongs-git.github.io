@@ -21,6 +21,9 @@ import { initRetro } from './retro.js';
 import { initHistory } from './history.js';
 import { initDrawingSync } from './draw.js';
 import { initDataStatus } from './data-status.js';
+import { initTimeframes, feedInterval, TF_MS, TF_WORDS, tfFromWords } from './timeframes.js';
+import { initDaily } from './daily.js';
+import { initCapture } from './capture.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
@@ -64,6 +67,22 @@ app.feed = new MarketFeed(app.settings);
 installRelayGuards(app);
 initDataStatus(app);
 app.indai = new Indai(app);
+// Website-only spoken commands: the longer chart timeframes ("hourly chart", "daily chart") and "analyze the chart".
+{
+  const ind = app.indai, tryCommand = ind.tryCommand.bind(ind);
+  ind.tryCommand = (raw) => {
+    const t = ' ' + String(raw || '').toLowerCase() + ' ';
+    const tf = /\b(chart|candles?|time ?frame)\b/.test(t) ? tfFromWords(t) : null;
+    if (tf) { app.setTimeframe(tf); ind.say(`${TF_WORDS[tf][0].toUpperCase()}${TF_WORDS[tf].slice(1)} chart.`, 'info', { speak: false }); return true; }
+    if (/\b(analy[sz]e|capture|read|scan)\b.*\b(the chart|my chart|this chart|the screen|what i see)\b/.test(t) && app.chart) {
+      if (app.layout === 'phone') app.ui.showTab('chart');
+      requestAnimationFrame(() => app.chart.analyzeView());
+      ind.say('Reading the chart.', 'info', { speak: false });
+      return true;
+    }
+    return tryCommand(raw);
+  };
+}
 // Keep a failed chain request visible even when the shared analysis routine returns early.
 {
   const analyze = app.indai.analyzeIdea.bind(app.indai);
@@ -373,10 +392,13 @@ app.removeSymbol = (sym) => {
   if (s.main === sym) s.main = s.symbols[0];
   app.saveSettings(); restartFeed();
 };
-app.setTimeframe = (iv) => {
-  if (!INTERVAL_LABEL[iv]) return;
-  app.settings.interval = iv; app.saveSettings();
-  app.feed.requestInterval(app.settings.main, iv);
+// Any chart timeframe from 1 minute to weekly. The shared feed keeps fetching 1, 5 or 15 minutes underneath
+// (timeframes.js builds the rest), so `settings.interval` stays one of those.
+app.setTimeframe = (tf) => {
+  if (!TF_MS[tf] && !INTERVAL_LABEL[tf]) return;
+  app.settings.chartTf = tf; app.settings.interval = feedInterval(tf); app.saveSettings();
+  app.feed.requestInterval(app.settings.main, app.settings.interval);
+  if (app.tf) app.tf.want(app.settings.main, tf);
   app.markDirty('chart');
 };
 app.toggleShow = (k) => app.setShow(k, !app.settings.show[k]);
@@ -932,7 +954,7 @@ app.showIdeaOnChart = (sig) => {
   app.ideaFocus = sig.id;
   if (app.focus) app.closeFocus();
   app.selectSymbol(sig.sym);
-  if (app.settings.interval === '15min') app.setTimeframe('5min');
+  if (!['1min', '5min'].includes(app.tf ? app.tf.current() : app.settings.interval)) app.setTimeframe('5min');
   if (app.layout === 'phone') app.ui.showTab('chart'); else document.getElementById('p-chart').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   app.markDirty('chart');
 };
@@ -1234,9 +1256,14 @@ async function boot() {
   const qp = new URLSearchParams(location.search);
   if (qp.get('demo') === '1' && app.settings.dataMode !== 'demo') { app.savedDataMode = app.settings.dataMode; app.settings.dataMode = 'demo'; app.forceDemo = true; }
   if (qp.get('nocheckin') === '1') app.noAutoCheckIn = true;
+  initTimeframes(app); initDaily(app);
   app.ui = initViews(app);
   initSheets(app);
-  initRetro(app); initHistory(app);
+  initRetro(app); initHistory(app); initCapture(app);
+  // the minutes the page receives are kept on the device every minute and when the page is put away
+  setInterval(() => app.history.keep(), 60e3);
+  window.addEventListener('pagehide', () => app.history.keep());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) app.history.keep(); });
 initDrawingSync(app);
   initIdeas(app);
   initPush(app);
