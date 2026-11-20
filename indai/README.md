@@ -10,7 +10,8 @@ same backend, same brain, same voice. Only the screens are different.
 - Top bar with the market clock and where prices come from (live, delayed or demo).
 - Watchlist with sparklines, the main candlestick chart (1, 5, 15 and 30 minutes, 1 and 4 hours, daily and weekly) with VWAP,
   EMA clouds and GEX levels, lead/lag, GEX levels. 30 minutes and longer open with earlier sessions in view; daily and
-  weekly go back years (INDAI's backend, plus Twelve Data when a key is saved in Settings).
+  weekly come from INDAI's backend (CBOE): about a year today, and years once the backend honours `days` (Ikpa's
+  CAP-3).
 - Candles kept on the device: the minutes the page receives (regular and extended hours, 45 days) and every daily candle
   are saved in the browser, so yesterday and earlier days are still on the chart after the close, over the weekend and
   when the backend has nothing for them.
