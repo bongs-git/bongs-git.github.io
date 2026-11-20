@@ -144,7 +144,8 @@ export function initDaily(app) {
       e.cache[tf] = out;
       return out;
     },
-    want(sym) { const e = entry(sym); if (!e.busy && (!e.done || (e.failedAt && Date.now() - e.failedAt > 30e3))) load(sym); },
+    // After a failed load, wait 30 seconds before asking again (the chart calls this on every frame near the left edge).
+    want(sym) { const e = entry(sym); if (e.busy || e.done || (e.failedAt && Date.now() - e.failedAt < 30e3)) return; load(sym); },
     state(sym) { const e = entry(sym); return { candles: e.days.length, done: e.done, busy: e.busy, failedAt: e.failedAt, source: e.source, daily: true }; },
     reload(sym) { const e = entry(sym); e.done = false; e.failedAt = 0; load(sym); },
   };

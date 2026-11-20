@@ -98,6 +98,21 @@ const box = (p) => p.evaluate(() => { const r = document.getElementById('chart-h
     check('[device memory] no page errors', !errs.length, errs.slice(0, 3));
     await ctx.close();
   }
+  // ---- daily candles that cannot load: say so and wait before asking again, instead of asking on every frame
+  {
+    const ctx = await b.newContext({ viewport: { width: 1280, height: 860 } }), p = await ctx.newPage(), errs = [];
+    let asks = 0;
+    p.on('pageerror', e => errs.push(String(e)));
+    await installBackend(p, lastSession(), (req, json) => req.method() === 'GET' ? json({ configured: false, passcode: false }) : json({ error: 'not_configured', message: 'off' }, 503));
+    await p.route('**/functions/v1/indai-market?kind=daily*', route => { asks++; route.fulfill({ status: 502, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: 'upstream', message: 'Market data is unavailable.' }) }); });
+    await p.goto(BASE + '?nocheckin=1&nosw=1'); await ready(p);
+    await p.evaluate(() => window.__indai.app.setTimeframe('1D')); await sleep(4000);
+    const note = await p.evaluate(() => document.getElementById('ch-history').textContent);
+    check('[daily candles unavailable] the chart says they could not load', /could not load/.test(note), note);
+    check('[daily candles unavailable] the backend is asked again only after a pause', asks >= 1 && asks <= 2, { asks });
+    check('[daily candles unavailable] no page errors', !errs.length, errs.slice(0, 3));
+    await ctx.close();
+  }
   // ---- INDAI's part: the conversation brain today; the picture and the atlas once the server offers them
   for (const modes of [[], ['capture', 'atlas']]) {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 860 } }), p = await ctx.newPage(), errs = [], asked = [];
