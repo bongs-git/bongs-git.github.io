@@ -1,0 +1,76 @@
+// Earlier sessions for the main chart, so it can be scrolled back in time: the one-minute candles the TradingView
+// bridge has stored on the backend, regular hours only, fetched a page at a time as the chart nears their start.
+// In demo mode earlier sessions are made up, like everything else there.
+import { RELAY_URL } from './relay.js';
+import { aggregate, ema, vwap, etParts, sessionTimes, isTradingDay, chartSession, INTERVAL_MS } from './market.js';
+
+const PAGE = 1000, DEMO_DAYS = 8;
+
+export function initHistory(app) {
+  const store = new Map(); // ticker -> { bars: one-minute candles oldest first, done, busy, failedAt, cache }
+  const entry = (sym) => { if (!store.has(sym)) store.set(sym, { bars: [], done: false, busy: false, failedAt: 0, cache: {} }); return store.get(sym); };
+  const regular = (t) => { const p = etParts(t); if (!isTradingDay(p.y, p.m, p.d)) return false; const s = sessionTimes(p.y, p.m, p.d); return t >= s.open && t < s.close; };
+
+  // Made-up earlier sessions that end where the oldest known candle starts.
+  function demoRows(sym, e) {
+    const first = e.bars[0] || app.feed.getBars(sym, '1min')[0];
+    if (!first) return [];
+    let seed = [...sym].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) + Math.floor(first.t / 864e5);
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+    const out = []; let price = first.o, at = first.t;
+    for (let d = 0; d < 2; d++) {
+      const s = chartSession(chartSession(at).open - 1);
+      for (let t = s.close - 60e3; t >= s.open; t -= 60e3) {
+        const c = price, o = c * (1 + rnd() * 0.0014), hi = Math.max(o, c) * (1 + Math.abs(rnd()) * 0.0006), lo = Math.min(o, c) * (1 - Math.abs(rnd()) * 0.0006);
+        out.push({ t, o: +o.toFixed(2), h: +hi.toFixed(2), l: +lo.toFixed(2), c: +c.toFixed(2), v: Math.round(20000 + Math.abs(rnd()) * 90000) });
+        price = o;
+      }
+      at = s.open;
+    }
+    return out;
+  }
+  async function more(sym) {
+    const e = entry(sym);
+    if (e.busy || e.done) return;
+    e.busy = true;
+    try {
+      let rows, last;
+      if (app.feed.status.mode === 'demo') { rows = demoRows(sym, e); last = !rows.length || e.bars.length + rows.length >= DEMO_DAYS * 390; }
+      else {
+        const r = await fetch(`${RELAY_URL}/functions/v1/indai-tv?bars=1&ticker=${encodeURIComponent(sym)}&before=${e.oldest || Date.now()}&limit=${PAGE}`);
+        if (!r.ok) throw new Error('history ' + r.status);
+        rows = (await r.json()).bars || []; last = rows.length < PAGE;
+        if (rows.length) e.oldest = Math.min(...rows.map(b => +b.t));
+      }
+      const add = rows.map(b => ({ t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v || 0 }))
+        .filter(b => b.t % 60e3 === 0 && b.c > 0 && b.o > 0 && regular(b.t) && (!e.bars.length || b.t < e.bars[0].t)).sort((a, b) => a.t - b.t);
+      e.bars = [...add, ...e.bars]; e.done = last; e.cache = {};
+      if (add.length) app.markDirty('chart');
+    } catch { e.failedAt = Date.now(); }
+    e.busy = false;
+  }
+
+  app.history = {
+    // Candles of one size that ended before `before` (the open of the session on the chart), oldest first, with the
+    // same session-by-session averages the chart draws for today.
+    series(sym, iv, before) {
+      const e = entry(sym), key = iv + '|' + before + '|' + e.bars.length;
+      if (e.cache.key === key) return e.cache;
+      const src = e.bars.filter(b => b.t < before), bars = iv === '1min' ? src : aggregate(src, INTERVAL_MS[iv]);
+      const out = { key, bars, e5: [], e12: [], e34: [], e50: [], vw: [], day: [], starts: [] };
+      for (let a = 0, d = 0; a < bars.length; d++) {
+        let z = a + 1;
+        while (z < bars.length && bars[z].t - bars[z - 1].t < 3 * 3600e3) z++;
+        const part = bars.slice(a, z), closes = part.map(b => b.c);
+        out.starts.push(a);
+        out.e5.push(...ema(closes, 5)); out.e12.push(...ema(closes, 12)); out.e34.push(...ema(closes, 34)); out.e50.push(...ema(closes, 50)); out.vw.push(...vwap(part));
+        for (let k = a; k < z; k++) out.day.push(d);
+        a = z;
+      }
+      return (e.cache = out);
+    },
+    // Asks for the next older page unless one is on its way, there is no more, or the last try just failed.
+    want(sym) { const e = entry(sym); if (!e.busy && !e.done && Date.now() - e.failedAt > 30e3) more(sym); },
+    state(sym) { const e = entry(sym); return { candles: e.bars.length, done: e.done, busy: e.busy }; },
+  };
+}

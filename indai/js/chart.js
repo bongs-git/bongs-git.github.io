@@ -11,8 +11,24 @@ import { drawingsFor, addDrawing, removeDrawing, clearDrawings, saveDrawings, di
 const DPR = () => Math.min(3, window.devicePixelRatio || 1);
 const MIN_SLOTS = 8;
 // Between the chart's pixels and its time and price, for the view in `g` (the geometry of the last draw).
-const xOf = (g, t) => g.plot.x + ((t - g.open) / g.ivMs - g.first + 0.5) * g.cw;
-const tOf = (g, x) => g.open + ((x - g.plot.x) / g.cw + g.first - 0.5) * g.ivMs;
+// Today's candles sit at their minute of the session; earlier sessions are packed to the left of them without the
+// overnight gaps, so a time before today's open is looked up among those candles.
+const slotOf = (g, t) => {
+  if (!g.H || t >= g.open) return (t - g.open) / g.ivMs;
+  const h = g.hist;
+  if (t <= h[0].t) return -g.H + (t - h[0].t) / g.ivMs;
+  let lo = 0, hi = g.H - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (h[m].t <= t) lo = m; else hi = m - 1; }
+  return lo - g.H + Math.min(1, (t - h[lo].t) / g.ivMs);
+};
+const timeOf = (g, s) => {
+  if (!g.H || s >= 0) return g.open + s * g.ivMs;
+  const j = s + g.H, k = Math.min(g.H - 1, Math.floor(j));
+  return j < 0 ? g.hist[0].t + j * g.ivMs : g.hist[k].t + (j - k) * g.ivMs;
+};
+const xOf = (g, t) => g.plot.x + (slotOf(g, t) - g.first + 0.5) * g.cw;
+const tOf = (g, x) => timeOf(g, (x - g.plot.x) / g.cw + g.first - 0.5);
+const fmtDay = (t) => new Date(t).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' });
 const pOf = (g, y) => g.lo + ((g.plot.y + g.plot.h - Math.max(g.plot.y, Math.min(g.plot.y + g.plot.h, y))) / g.plot.h) * (g.hi - g.lo);
 const inPlot = (g, p) => p.x >= g.plot.x && p.x <= g.plot.x + g.plot.w && p.y >= g.plot.y && p.y <= g.plot.y + g.plot.h;
 
@@ -125,7 +141,7 @@ export class PriceChart {
   ui() { if (this.onUi) this.onUi(); }
   // Dragging a drawing up or down must not scroll the page, so the browser's own touch panning is off while drawing.
   syncTouch() { this.host.style.touchAction = this.drawing || this.sel || this.ys || this.tool !== 'move' ? 'none' : ''; }
-  clampSlots(n) { const g = this.geo; return Math.max(MIN_SLOTS, Math.min(Math.max(g ? g.full : 390, 30), n)); }
+  clampSlots(n) { const g = this.geo; return Math.max(MIN_SLOTS, Math.min(g ? g.maxSlots : 390, n)); }
   redraw() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.draw(); }); }
   setView(first, slots) { const was = !!this.view; this.view = { first, slots }; this.redraw(); if (!was) this.ui(); }
   // The price range, kept between a sliver of and many times the range that fits the candles.
@@ -320,14 +336,20 @@ export class PriceChart {
       if (this.drag && this.drag.kind !== 'pinch') this.drag = null;
       this.syncTouch(); this.ui();
     }
+    // Earlier sessions, when the trader has scrolled or zoomed back to them, sit at negative slots left of today's open.
+    const hs = app.history ? app.history.series(sym, iv, sess.open) : null, HN = hs ? hs.bars.length : 0;
+    const zoomMax = Math.min(2400, Math.max(full, 30) + HN);
     if (this.view) {
-      slots = Math.max(MIN_SLOTS, Math.min(Math.max(full, 30), this.view.slots));
-      first = Math.max(idxOf(bars[0]) + 3 - slots, Math.min(li - 2, this.view.first));
+      slots = Math.max(MIN_SLOTS, Math.min(zoomMax, this.view.slots));
+      first = Math.max((HN ? -HN : idxOf(bars[0])) + 3 - slots, Math.min(li - 2, this.view.first));
       this.view = { first, slots };
+      if (app.history && first < 60 - HN) app.history.want(sym); // near the oldest candle we have: fetch older ones
     }
     const cw = plot.w / slots;
     const xi = (i) => plot.x + (i - first + 0.5) * cw;
-    const pts = bars.map((b, k) => ({ b, k, i: idxOf(b) })).filter(p => p.i > first - 1 && p.i < first + slots);
+    const pts = [];
+    for (let j = Math.max(0, Math.ceil(first - 1 + HN)); j < HN && j - HN < first + slots; j++) pts.push({ b: hs.bars[j], i: j - HN, e5: hs.e5[j], e12: hs.e12[j], e34: hs.e34[j], e50: hs.e50[j], vw: hs.vw[j], day: hs.day[j] });
+    bars.forEach((b, k) => { const i = idxOf(b); if (i > first - 1 && i < first + slots) pts.push({ b, i, e5: e5[k], e12: e12[k], e34: e34[k], e50: e50[k], vw: vw[k], day: -1 }); });
     if (!pts.length) return;
     let lo = Math.min(...pts.map(p => p.b.l)), hi = Math.max(...pts.map(p => p.b.h));
     const lv = s.show.gex ? app.levelsFor(sym) : null;
@@ -356,12 +378,20 @@ export class PriceChart {
     // time axis
     const spanH = slots * ivMs / 3600e3, spanMin = spanH * 60;
     const everyMin = spanMin <= 25 ? 5 : spanMin <= 50 ? 10 : spanMin <= 100 ? 15 : spanH <= 2.2 ? 30 : spanH <= 4 ? 60 : W < 460 ? 120 : 60;
+    // where each earlier session starts, and where today starts: a line and the date
+    const dayXs = [];
+    if (HN) for (const [i, t] of [...hs.starts.map(j => [j - HN, hs.bars[j].t]), [0, sess.open]]) {
+      const x = Math.round(plot.x + (i - first) * cw) + 0.5;
+      if (x < plot.x + 1 || x > plot.x + plot.w - 30) continue;
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
+      if (!dayXs.length || x - dayXs[dayXs.length - 1] > 44) { txt(ctx, fmtDay(t), x + 4, plot.y + plot.h + 15, { size: 10.5, weight: 600, color: C.dim }); dayXs.push(x); }
+    }
     for (let m = 570, lastX = -99; m <= 960; m += 5) {
       if ((m - 600) % everyMin) continue;
       const t = sess.open + (m - 570) * 60e3;
       if (t > sess.close) break;
       const x = Math.round(plot.x + ((t - sess.open) / ivMs - first) * cw) + 0.5;
-      if (x < plot.x + 8 || x > plot.x + plot.w - 4 || x - lastX < 46) continue;
+      if (x < plot.x + 8 || x > plot.x + plot.w - 4 || x - lastX < 46 || dayXs.some(d => x - d > -30 && x - d < 50)) continue;
       lastX = x;
       ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
       txt(ctx, fmtHM(t).replace(':00', '').replace(' ', '').toLowerCase(), x, plot.y + plot.h + 15, { size: 10.5, color: C.faint, align: 'center' });
@@ -370,14 +400,14 @@ export class PriceChart {
     if (s.show.ema) {
       const cloud = (fa, fb, upCol, dnCol) => {
         for (let n = 0; n < pts.length - 1; n++) {
-          const a = pts[n], b = pts[n + 1], A = fa[a.k], B = fb[a.k], A2 = fa[b.k], B2 = fb[b.k];
-          if (A == null || B == null || A2 == null || B2 == null) continue;
+          const a = pts[n], b = pts[n + 1], A = a[fa], B = a[fb], A2 = b[fa], B2 = b[fb];
+          if (a.day !== b.day || A == null || B == null || A2 == null || B2 == null) continue;
           ctx.fillStyle = A >= B ? upCol : dnCol;
           ctx.beginPath(); ctx.moveTo(xi(a.i), yv(A)); ctx.lineTo(xi(b.i), yv(A2)); ctx.lineTo(xi(b.i), yv(B2)); ctx.lineTo(xi(a.i), yv(B)); ctx.closePath(); ctx.fill();
         }
       };
-      cloud(e34, e50, 'rgba(110,195,242,0.13)', 'rgba(240,150,74,0.13)');
-      cloud(e5, e12, 'rgba(62,207,142,0.22)', 'rgba(242,112,107,0.22)');
+      cloud('e34', 'e50', 'rgba(110,195,242,0.13)', 'rgba(240,150,74,0.13)');
+      cloud('e5', 'e12', 'rgba(62,207,142,0.22)', 'rgba(242,112,107,0.22)');
     }
     const bw = Math.max(1, Math.min(14, cw * 0.66));
     for (const p of pts) {
@@ -390,7 +420,7 @@ export class PriceChart {
     }
     if (s.show.vwap) {
       ctx.strokeStyle = C.gold; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.beginPath();
-      pts.forEach((p, n) => { const x = xi(p.i), y = yv(vw[p.k]); n ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      pts.forEach((p, n) => { const x = xi(p.i), y = yv(p.vw); n && pts[n - 1].day === p.day ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.stroke(); ctx.setLineDash([]);
     }
     ctx.restore();
@@ -415,7 +445,7 @@ export class PriceChart {
     };
     if (s.show.vwap) {
       // to the right of the last candle when there is room, otherwise just left of it, below the line
-      const lp = pts[pts.length - 1], vx = xi(lp.i), vy = yv(vw[lp.k]);
+      const lp = pts[pts.length - 1], vx = xi(lp.i), vy = yv(lp.vw);
       label('VWAP', 'right', vy, { size: 10, color: C.gold, spots: [[vx + 8, vy + 4], [vx + 8, vy - 8], [Math.max(plot.x + 4, vx - 40), vy + 15], [Math.max(plot.x + 4, vx - 40), vy - 8]] });
     }
     if (lv) {
@@ -465,7 +495,7 @@ export class PriceChart {
     ctx.beginPath(); ctx.moveTo(xi(li) > plot.x + plot.w ? plot.x : Math.max(plot.x, xi(li)), ly); ctx.lineTo(plot.x + plot.w, ly); ctx.stroke(); ctx.setLineDash([]);
     rr(ctx, plot.x + plot.w + 2, ly - 9, axisW - 2, 18, 4); ctx.fillStyle = C.sky; ctx.fill();
     txt(ctx, fmtPrice(last), plot.x + plot.w + axisW / 2 + 1, ly + 0.5, { size: 10.5, weight: 600, fam: F.mono, color: '#04121c', align: 'center', base: 'middle' });
-    this.geo = { W, H, plot, pts, xi, yv, cw, first, lo, hi, autoLo, autoHi, axisW, slots, full, open: sess.open, ivMs };
+    this.geo = { W, plot, pts, xi, yv, cw, first, lo, hi, autoLo, autoHi, axisW, slots, full, maxSlots: zoomMax, open: sess.open, ivMs, H: HN, hist: hs ? hs.bars : [] };
     this.drawOver();
   }
 
@@ -525,10 +555,10 @@ export class PriceChart {
     const x = Math.round(xi(best.i)) + 0.5, y = Math.round(h.y) + 0.5;
     ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke();
-    const b = best.b;
+    const b = best.b, when = (b.t < g.open ? fmtDay(b.t) + ' ' : '') + fmtHM(b.t);
     const parts = W < 460
-      ? [fmtHM(b.t), `O ${fmtPrice(b.o)}`, `H ${fmtPrice(b.h)}`, `L ${fmtPrice(b.l)}`, `C ${fmtPrice(b.c)}`]
-      : [fmtHM(b.t), `O ${fmtPrice(b.o)}`, `H ${fmtPrice(b.h)}`, `L ${fmtPrice(b.l)}`, `C ${fmtPrice(b.c)}`, `V ${fmtVol(b.v)}`];
+      ? [when, `O ${fmtPrice(b.o)}`, `H ${fmtPrice(b.h)}`, `L ${fmtPrice(b.l)}`, `C ${fmtPrice(b.c)}`]
+      : [when, `O ${fmtPrice(b.o)}`, `H ${fmtPrice(b.h)}`, `L ${fmtPrice(b.l)}`, `C ${fmtPrice(b.c)}`, `V ${fmtVol(b.v)}`];
     const line = parts.join('  ');
     ctx.font = `500 11px ${F.mono}`;
     const tw = Math.min(plot.w - 8, ctx.measureText(line).width + 16);

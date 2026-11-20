@@ -18,6 +18,7 @@ import { initIdeas } from './ideas.js';
 import { initLock } from './lock.js';
 import { initPush } from './push.js';
 import { initRetro } from './retro.js';
+import { initHistory } from './history.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
@@ -1194,7 +1195,7 @@ async function boot() {
   if (qp.get('nocheckin') === '1') app.noAutoCheckIn = true;
   app.ui = initViews(app);
   initSheets(app);
-  initRetro(app);
+  initRetro(app); initHistory(app);
   initIdeas(app);
   initPush(app);
   // Behind the access lock nothing starts: no prices, no alerts, no voice. Unlocking reloads the page.

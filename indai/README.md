@@ -14,6 +14,9 @@ same backend, same brain, same voice. Only the screens are different.
   one tap to rate it or see it on the chart. The day's ideas survive a reload, and ones you missed are caught up quietly.
 - A chart you can work on: drag to move it, pinch or scroll to zoom, two quick taps to reset. "Draw" adds trend lines and
   price levels you can move, change and delete; they are kept on the device per ticker.
+- Drag the price axis or the time axis to stretch or squeeze that scale. Drag the chart back past the open to see
+  earlier sessions (as many as the TradingView bridge has stored). "TradingView chart" shows TradingView's own
+  chart in the panel for deeper history and their tools.
 - Retrospective (button in Ideas, best after the close): how the day's setups did, where they missed most (time of day, kind
   of setup, direction, ticker, entry, stop, target), and what INDAI would change. You apply the changes; she alerts with
   them from then on, and each new day checks whether they held up.
