@@ -64,7 +64,8 @@ export function initCapture(app) {
     const modes = (status && Array.isArray(status.modes)) ? status.modes : [];
     // the atlas's tested numbers for each pattern found, only from a server that offers them
     if (modes.includes('atlas') && c.r.notable.length) {
-      relay.brain({ mode: 'atlas', op: 'scan', symbol: c.shot.sym, timeframe: c.shot.tf, intraday: c.r.intraday, patterns: summary.patterns }, pass)
+      // A box over a whole session can hold hundreds of patterns. The newest ones are the ones shown, so those are sent.
+      relay.brain({ mode: 'atlas', op: 'scan', symbol: c.shot.sym, timeframe: c.shot.tf, intraday: c.r.intraday, patterns: summary.patterns.slice(-150) }, pass)
         .then(res => { c.atlas = (res && (res.reads || res.result?.reads)) || []; c.status.atlas = 'done'; })
         .catch(() => { c.status.atlas = 'failed'; })
         .finally(() => { app.markDirty('capture'); if (c === cur) keep(); });
