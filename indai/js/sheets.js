@@ -474,6 +474,10 @@ function initSettings(app) {
       return `${sym}: CW ${lv.cw ?? '—'}  PW ${lv.pw ?? '—'}  ZG ${lv.zg ?? '—'}  <span class="${c}">${esc(levelSourceLabel(lv).replace('Levels: ', ''))}</span>`;
     }).join('\n');
     const vp = [];
+    const cv = app.cloudVoice;
+    if (cv && cv.state === 'on') vp.push(`<span class="ok">Hosted voice${cv.voice && cv.voice.name ? ' (' + esc(cv.voice.name) + ')' : ''}</span>: she speaks from the server, nothing to download${cv.downUntil > Date.now() ? `. <span class="warn">Resting for a few minutes:</span> ${esc((cv.note || 'it could not be reached').replace(/\.$/, ''))}` : ''}. <a href="./voice.html">Choose her voice</a>`);
+    else if (cv && cv.state === 'trouble') vp.push(`<span class="warn">Hosted voice is set up but not working:</span> ${esc((cv.note || 'ElevenLabs did not answer').replace(/\.$/, ''))}. <a href="./voice.html">Voice page</a>`);
+    else if (s.researchPass) vp.push('Hosted voice: not set up. <a href="./voice.html">Voice page</a>');
     vp.push(vs.ttsReady ? '<span class="ok">Voice ready</span>' : vs.ttsLoad != null ? `<span class="warn">Voice downloading ${vs.ttsLoad}%</span>` : s.voiceEngine === 'system' ? 'Using the browser voice' : 'Voice downloads the first time she speaks (about 90 MB, then cached)');
     vp.push(vs.sttReady ? `<span class="ok">Listening ready (${esc(vs.sttModel || 'on-device')})</span>` : vs.sttLoad != null ? `<span class="warn">Listening model ${vs.sttLoad}%</span>` : v.SR && s.micEngine !== 'whisper' ? 'Listening uses the browser recognizer here' : 'Listening model downloads the first time you talk (about 40 MB)');
     vp.push(self.crossOriginIsolated ? 'Multi-core voice processing is on' : 'Single-core voice processing (multi-core switches on after the first reload where the browser supports it)');

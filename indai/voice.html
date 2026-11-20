@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050709">
+<meta name="robots" content="noindex">
+<title>Her voice · INDAI</title>
+<link rel="icon" href="./icons/icon-192.png">
+<style>
+  :root { --ink:#050709; --panel:#0a0e14; --raised:#111721; --line:rgba(255,255,255,.12); --text:#f3f1ea; --dim:#9aa3b2; --gold:#dcbf6e; --gold-ink:#17120a; --up:#3ecf8e; --down:#f2706b; }
+  * { box-sizing: border-box; }
+  html { background: var(--ink); color-scheme: dark; -webkit-text-size-adjust: 100%; }
+  body { margin: 0; min-height: 100dvh; background: var(--ink); color: var(--text); font: 400 16px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; padding: max(20px, env(safe-area-inset-top)) 16px 48px; }
+  main { max-width: 600px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  ol { margin: 0 0 12px; padding-left: 22px; } li { margin-bottom: 6px; }
+  code { background: var(--raised); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+  .dim { color: var(--dim); } .ok { color: var(--up); } .bad { color: var(--down); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 16px 0; }
+  button, a.btn { min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; font-weight: 600; text-align: center; text-decoration: none; padding: 10px 14px; cursor: pointer; touch-action: manipulation; }
+  button.gold { background: var(--gold); color: var(--gold-ink); border-color: transparent; }
+  button.wide, a.btn { display: block; width: 100%; }
+  button:disabled { opacity: .45; pointer-events: none; }
+  button.chip { min-height: 44px; padding: 6px 14px; font-weight: 500; }
+  button.chip.on { border-color: var(--gold); color: var(--gold); }
+  input[type=password], input[type=search] { width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: inherit; padding: 10px 12px; margin-bottom: 10px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > .grow { flex: 1 1 0; min-width: 0; }
+  .voice { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--line); }
+  .voice:first-child { border-top: 0; }
+  .voice.hers b::after { content: '  · hers'; color: var(--gold); font-weight: 500; }
+  .voice .who { min-width: 0; } .voice .who div { overflow-wrap: anywhere; }
+  label.switch { display: flex; gap: 12px; align-items: center; min-height: 44px; cursor: pointer; }
+  label.switch input { width: 22px; height: 22px; accent-color: var(--gold); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Her voice</h1>
+  <p class="dim">INDAI speaks from the server in a voice you choose, so no device has to download one. Every device you use hears the same voice.</p>
+
+  <div class="card" id="passcard" hidden>
+    <label for="pass">Your INDAI passcode</label>
+    <input id="pass" type="password" autocomplete="current-password" placeholder="Passcode">
+    <button id="passgo" class="gold wide">Continue</button>
+  </div>
+
+  <div class="card">
+    <p id="state" role="status" style="font-weight:600">Checking…</p>
+    <p class="dim" id="detail"></p>
+    <button id="hear" class="gold wide" hidden>Hear her</button>
+    <p id="out" role="status" style="margin:12px 0 0"></p>
+  </div>
+
+  <div class="card" id="setup" hidden>
+    <h2>Set it up (about five minutes)</h2>
+    <ol>
+      <li>Make an account at <a href="https://elevenlabs.io" target="_blank" rel="noopener">elevenlabs.io</a> and pick a plan. The smallest paid plan is enough to begin.</li>
+      <li>In ElevenLabs, create an API key. If it asks what the key may do, allow Text to Speech and reading Voices.</li>
+      <li>In Supabase, add it as the secret <code>ELEVENLABS_API_KEY</code>.</li>
+      <li>Come back here and reload.</li>
+    </ol>
+    <a class="btn" href="https://supabase.com/dashboard/project/zptjziewsfuvfcogrikz/functions/secrets" target="_blank" rel="noopener">Open Supabase secrets</a>
+  </div>
+
+  <div class="card" id="device" hidden>
+    <label class="switch"><input type="checkbox" id="use"> <span>Use the hosted voice on this device</span></label>
+    <p class="dim" style="margin:6px 0 0">Off, she uses the voice on the device itself, as before.</p>
+  </div>
+
+  <div class="card" id="picker" hidden>
+    <h2>Choose her voice</h2>
+    <p class="dim">These are the voices in your ElevenLabs account. Listen says one line in that voice (it uses a few of your credits). To see more, save voices to your library at elevenlabs.io and reload.</p>
+    <div class="row" style="margin-bottom:10px"><button class="chip on" data-g="female">Women</button><button class="chip" data-g="male">Men</button><button class="chip" data-g="">All</button></div>
+    <input id="find" type="search" placeholder="Search by name or style" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div id="voices"><p class="dim">Loading…</p></div>
+  </div>
+  <p><a class="dim" href="./">Back to INDAI</a></p>
+</main>
+<script type="module">
+import { RELAY_URL, RELAY_ANON } from './js/relay.js';
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const say = (node, text, kind = '') => { node.textContent = text; node.classList.remove('ok', 'bad', 'dim'); if (kind) node.classList.add(kind); };
+const read = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
+const settings = () => { try { return JSON.parse(read('jarvis.settings.v1') || 'null') || {}; } catch { return {}; } };
+let pass = settings().researchPass || '', voices = [], hers = null, gender = 'female', ctx = null, playing = null, busy = null;
+const line = () => `Good morning${settings().name ? ', ' + String(settings().name).slice(0, 30) : ''}. I'm INDAI. The market opens in ten minutes, and I have two ideas for you.`;
+
+async function ask(body, audio = false) {
+  let r;
+  try { r = await fetch(`${RELAY_URL}/functions/v1/indai-voice`, { method: 'POST', headers: { apikey: RELAY_ANON, Authorization: `Bearer ${RELAY_ANON}`, 'Content-Type': 'application/json', 'x-indai-pass': pass }, body: JSON.stringify(body) }); }
+  catch { const e = new Error('No answer reached this device.'); e.status = 0; throw e; }
+  if (!r.ok) { const j = await r.json().catch(() => ({})); const e = new Error(j.message || `Something went wrong (${r.status}).`); e.status = r.status; e.code = j.error; throw e; }
+  return audio ? r.arrayBuffer() : r.json();
+}
+// Sound has to be started inside the tap that asks for it, or a phone stays silent.
+function unlock() {
+  if (!ctx) { const AC = window.AudioContext || window.webkitAudioContext; ctx = new AC(); }
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* older phones */ }
+  try { const s = ctx.createBufferSource(); s.buffer = ctx.createBuffer(1, 1, 22050); s.connect(ctx.destination); s.start(); } catch { /* already running */ }
+}
+function hush() { if (playing) { try { playing.onended = null; playing.stop(); } catch { /* ended */ } playing = null; } }
+async function speak(button, voice_id, done) {
+  unlock(); hush();
+  if (busy) busy.disabled = false;
+  busy = button; button.disabled = true; say($('out'), '');
+  try {
+    const bytes = await ask({ op: 'speak', text: line(), ...(voice_id ? { voice_id } : {}) }, true);
+    const audio = await new Promise((ok, no) => { const p = ctx.decodeAudioData(bytes, ok, no); if (p && p.catch) p.catch(no); });
+    hush();
+    const src = ctx.createBufferSource(); src.buffer = audio; src.connect(ctx.destination);
+    src.onended = () => { if (playing === src) playing = null; };
+    playing = src; src.start();
+    if (done) done();
+  } catch (e) { say($('out'), e.message || 'That did not play.', 'bad'); }
+  button.disabled = false; busy = null;
+}
+
+function show(s) {
+  $('passcard').hidden = true;
+  $('setup').hidden = s.configured; $('device').hidden = !s.ready; $('picker').hidden = !s.ready; $('hear').hidden = !s.ready;
+  if (!s.configured) { say($('state'), 'Not set up yet.', 'bad'); $('detail').textContent = 'She is using the voice on each device for now.'; return; }
+  if (!s.ready) { say($('state'), 'Set up, but ElevenLabs is not answering.', 'bad'); $('detail').textContent = s.message || ''; $('setup').hidden = false; return; }
+  hers = s.voice;
+  say($('state'), `Her voice: ${s.voice.name || 'the one named in your Supabase secrets'}`, 'ok');
+  $('detail').textContent = s.voice.picked === 'auto' ? 'I picked this one to start with. Listen to the others below and choose the one you like.' : 'This is the voice she uses everywhere.';
+  $('use').checked = read('indai.voice.hosted') !== 'off';
+}
+function paint() {
+  const q = $('find').value.trim().toLowerCase();
+  const list = voices.filter((v) => (!gender || v.gender === gender) && (!q || `${v.name} ${v.description} ${v.accent} ${v.age} ${v.use}`.toLowerCase().includes(q)));
+  for (const b of document.querySelectorAll('[data-g]')) b.classList.toggle('on', b.dataset.g === gender);
+  $('voices').replaceChildren(...(list.length ? list.map((v) => {
+    const listen = el('button', { className: 'chip', textContent: 'Listen' }), use = el('button', { className: 'chip', textContent: hers && hers.id === v.id ? 'Chosen' : 'Use', disabled: !!(hers && hers.id === v.id) });
+    listen.onclick = () => speak(listen, v.id);
+    use.onclick = async () => { use.disabled = true; try { show(await ask({ op: 'choose', voice_id: v.id })); paint(); say($('out'), `${v.name} is her voice now, on every device.`, 'ok'); } catch (e) { say($('out'), e.message, 'bad'); use.disabled = false; } };
+    return el('div', { className: 'voice' + (hers && hers.id === v.id ? ' hers' : '') }, el('div', { className: 'who' }, el('b', { textContent: v.name }), el('div', { className: 'dim', textContent: [v.accent, v.age, v.use, v.description].filter(Boolean).join(' · ') || v.category })), el('div', { className: 'row', style: 'flex-wrap:nowrap' }, listen, use));
+  }) : [el('p', { className: 'dim', textContent: voices.length ? 'No voice matches. Try All, or another word.' : 'Your ElevenLabs account has no voices yet.' })]));
+}
+async function load() {
+  if (!pass) { $('passcard').hidden = false; say($('state'), 'Enter your passcode to begin.'); return; }
+  try {
+    const s = await ask({ op: 'status' });
+    show(s);
+    if (s.ready) { const j = await ask({ op: 'voices' }); voices = j.voices || []; if (!voices.some((v) => v.gender === 'female')) gender = ''; paint(); }
+  } catch (e) {
+    if (e.status === 401) { pass = ''; $('passcard').hidden = false; say($('state'), 'That passcode was not accepted.', 'bad'); }
+    else if (e.status === 404) say($('state'), 'This part of INDAI is not switched on yet.', 'bad');
+    else say($('state'), e.message, 'bad');
+  }
+}
+$('passgo').onclick = () => { pass = $('pass').value.trim(); load(); };
+$('pass').onkeydown = (e) => { if (e.key === 'Enter') $('passgo').click(); };
+$('hear').onclick = () => speak($('hear'), null);
+$('use').onchange = () => { write('indai.voice.hosted', $('use').checked ? 'on' : 'off'); say($('out'), $('use').checked ? 'This device will use the hosted voice.' : 'This device will use its own voice.', 'dim'); };
+$('find').oninput = paint;
+for (const b of document.querySelectorAll('[data-g]')) b.onclick = () => { gender = b.dataset.g; paint(); };
+load();
+</script>
+</body>
+</html>

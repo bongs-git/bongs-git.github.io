@@ -25,6 +25,7 @@ import { initTimeframes, feedInterval, TF_MS, TF_WORDS, tfFromWords } from './ti
 import { initDaily } from './daily.js';
 import { initCapture } from './capture.js';
 import { initOwnerFeed } from './owner-feed.js';
+import { initCloudVoice } from './cloud-voice.js';
 
 const STEPS = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
 const ETFS = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'SPX', 'XLF', 'XLE', 'SMH', 'TLT', 'GLD']);
@@ -1271,6 +1272,7 @@ initDrawingSync(app);
   initPush(app);
   // Behind the access lock nothing starts: no prices, no alerts, no voice. Unlocking reloads the page.
   if (initLock(app)) { window.__indai = { app, relay }; return; }
+  initCloudVoice(app);   // her hosted voice, when the owner has one set up (js/cloud-voice.js)
   app.feed.start();
   loadMorningGex();
   setInterval(loadMorningGex, 10 * 60e3);
