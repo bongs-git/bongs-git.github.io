@@ -113,6 +113,8 @@ export function initExtended(app) {
 
   app.ext = {
     kind: extKind,
+    // Every extended-hours minute held for a ticker (for candle-store.js to keep on the device).
+    all(sym) { return entry(sym).bars; },
     on,
     take,
     // One-minute candles outside regular hours that ended before `t`, for history.js to weave between earlier

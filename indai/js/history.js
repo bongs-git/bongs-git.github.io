@@ -4,13 +4,60 @@
 import { RELAY_URL } from './relay.js';
 import { aggregate, ema, vwap, etParts, sessionTimes, isTradingDay, chartSession, INTERVAL_MS } from './market.js';
 import { initExtended } from './ext.js';
+import { TF_MS, anchored } from './timeframes.js';
+import { candleStore } from './candle-store.js';
 
 const PAGE = 1000, DEMO_DAYS = 8;
 
 export function initHistory(app) {
   initExtended(app); // pre-market and after-hours candles, woven between the sessions below
   const store = new Map(); // ticker -> { bars: one-minute candles oldest first, done, busy, failedAt, cache }
-  const entry = (sym) => { if (!store.has(sym)) store.set(sym, { bars: [], done: false, busy: false, failedAt: 0, cache: {} }); return store.get(sym); };
+  const entry = (sym) => {
+    if (!store.has(sym)) { store.set(sym, { bars: [], done: false, busy: false, failedAt: 0, cache: {} }); hydrate(sym); }
+    return store.get(sym);
+  };
+  // Adds one-minute candles in time order, keeping the newest copy of a minute.
+  function merge(e, rows) {
+    if (!rows.length) return 0;
+    const at = new Map(e.bars.map(b => [b.t, b]));
+    let n = 0;
+    for (const b of rows) { if (!at.has(b.t)) n++; at.set(b.t, b); }
+    e.bars = [...at.values()].sort((a, b) => a.t - b.t); e.cache = {};
+    return n;
+  }
+  // What this device kept from earlier days (regular and extended hours), shown before the backend answers and
+  // still there when it cannot.
+  async function hydrate(sym) {
+    if (app.feed.status.mode === 'demo') return;
+    const open = chartSession().open, rows = await candleStore.minutes(sym, Date.now() - 45 * 864e5, Date.now());
+    if (!rows.length) return;
+    const e = store.get(sym), reg = rows.filter(b => regular(b.t));
+    const n = merge(e, reg.filter(b => b.t < open));
+    app.ext.take(sym, rows, true);
+    // The session on the chart, when the feed has nothing for it yet (backend down, market closed): from the device.
+    const today = reg.filter(b => b.t >= open), fs = app.feed.sym(sym);
+    if (today.length && !app.feed.getBars(sym, '1min').length && !app.feed.getBars(sym, '5min').length) {
+      fs.bars['1min'] = today.map(b => ({ ...b }));
+      if (fs.last == null) { fs.last = today[today.length - 1].c; fs.dayOpen = today[0].o; fs.high = Math.max(...today.map(b => b.h)); fs.low = Math.min(...today.map(b => b.l)); }
+      app.feed.bump(fs);
+    }
+    if (n || today.length) app.markDirty('chart');
+  }
+  // Keeps the minutes the page has received on the device: the feed's candles and the extended hours.
+  const savedTo = new Map();
+  function keep() {
+    if (app.feed.status.mode === 'demo') return;
+    for (const sym of app.feed.trackedSymbols) {
+      const fs = app.feed.syms.get(sym);
+      if (!fs) continue;
+      const from = (savedTo.get(sym) || 0) - 180e3;
+      const rows = [...fs.bars['1min'], ...(app.ext ? app.ext.all(sym) : [])].filter(b => b.t >= from && b.t % 60e3 === 0);
+      if (!rows.length) continue;
+      savedTo.set(sym, rows.reduce((m, b) => Math.max(m, b.t), 0));
+      candleStore.putMinutes(sym, rows);
+    }
+    candleStore.prune();
+  }
   const regular = (t) => { const p = etParts(t); if (!isTradingDay(p.y, p.m, p.d)) return false; const s = sessionTimes(p.y, p.m, p.d); return t >= s.open && t < s.close; };
 
   // Made-up earlier sessions that end where the oldest known candle starts.
@@ -45,10 +92,11 @@ export function initHistory(app) {
         if (rows.length) e.oldest = Math.min(...rows.map(b => +b.t));
         app.ext.take(sym, rows); // the same page carries the candles outside regular hours
       }
-      const add = rows.map(b => ({ t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v || 0 }))
-        .filter(b => b.t % 60e3 === 0 && b.c > 0 && b.o > 0 && regular(b.t) && (!e.bars.length || b.t < e.bars[0].t)).sort((a, b) => a.t - b.t);
-      e.bars = [...add, ...e.bars]; e.done = last; e.failedAt = 0; e.cache = {};
-      if (add.length) app.markDirty('chart');
+      const clean = rows.map(b => ({ t: +b.t, o: +b.o, h: +b.h, l: +b.l, c: +b.c, v: +b.v || 0 })).filter(b => b.t % 60e3 === 0 && b.c > 0 && b.o > 0);
+      if (app.feed.status.mode !== 'demo') candleStore.putMinutes(sym, clean); // kept on the device for later
+      const add = clean.filter(b => regular(b.t));
+      const n = merge(e, add); e.done = last; e.failedAt = 0;
+      if (n) app.markDirty('chart');
     } catch { e.failedAt = Date.now(); }
     e.busy = false; app.markDirty('chart');
   }
@@ -62,7 +110,9 @@ export function initHistory(app) {
       if (e.cache.key === key) return e.cache;
       const reg = e.bars.filter(b => b.t < before), extra = app.ext.rows(sym, before);
       // five- and fifteen-minute candles never straddle 9:30 or 4:00, so a candle is wholly inside or outside the session
-      const src = extra.length ? [...reg, ...extra].sort((a, b) => a.t - b.t) : reg, bars = iv === '1min' ? src : aggregate(src, INTERVAL_MS[iv]);
+      // 30-minute, hourly and 4-hour candles are anchored to 9:30 (timeframes.js), so they do not straddle it either
+      const ms = TF_MS[iv] || INTERVAL_MS[iv];
+      const src = extra.length ? [...reg, ...extra].sort((a, b) => a.t - b.t) : reg, bars = iv === '1min' ? src : ms > 900e3 ? anchored(src, ms) : aggregate(src, ms);
       const out = { key, bars, e5: [], e12: [], e34: [], e50: [], vw: [], day: [], starts: [], x: [] };
       for (let a = 0, d = 0; a < bars.length; d++) {
         let z = a + 1;
@@ -82,5 +132,6 @@ export function initHistory(app) {
     // Asks for the next older page unless one is on its way, there is no more, or the last try just failed.
     want(sym) { const e = entry(sym); if (!e.busy && !e.done && Date.now() - e.failedAt > 30e3) more(sym); },
     state(sym) { const e = entry(sym); return { candles: e.bars.length, done: e.done, busy: e.busy, failedAt: e.failedAt }; },
+    keep,
   };
 }

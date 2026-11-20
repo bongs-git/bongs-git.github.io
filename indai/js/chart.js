@@ -7,6 +7,7 @@ import { positionPnl, expiryCloseMs } from './options.js';
 import { C, F, fmtPrice, fmtPct, fmtVol, fmtMoney, hexA, colorFor } from './hud.js';
 import { levelSourceLabel } from './panels.js';
 import { drawingsFor, addDrawing, removeDrawing, clearDrawings, saveDrawings, startDrawingEdit, finishDrawingEdit, canUndoDrawing, undoDrawing, distToSegment } from './draw.js';
+import { TF_MS, isLong } from './timeframes.js';
 
 const DPR = () => Math.min(3, window.devicePixelRatio || 1);
 const MIN_SLOTS = 8;
@@ -37,6 +38,8 @@ const timeOf = (g, s) => {
 const xOf = (g, t) => g.plot.x + (slotOf(g, t) - g.first + 0.5) * g.cw;
 const tOf = (g, x) => timeOf(g, (x - g.plot.x) / g.cw + g.first - 0.5);
 const fmtDay = (t) => new Date(t).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' });
+const fmtDate = (t) => new Date(t).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' });
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pOf = (g, y) => g.lo + ((g.plot.y + g.plot.h - Math.max(g.plot.y, Math.min(g.plot.y + g.plot.h, y))) / g.plot.h) * (g.hi - g.lo);
 const inPlot = (g, p) => p.x >= g.plot.x && p.x <= g.plot.x + g.plot.w && p.y >= g.plot.y && p.y <= g.plot.y + g.plot.h;
 
@@ -244,6 +247,7 @@ export class PriceChart {
     if (p.y > bottom && p.x >= g.plot.x && p.x <= right) { this.drag = { kind: 'xscale', start: p, first0: g.first, slots0: g.slots, moved: false }; return; }
     if (!inPlot(g, p)) return;
     const at = { t: tOf(g, p.x), p: pOf(g, p.y) }, sym = this.app.settings.main;
+    if (this.tool === 'capture') { this.drag = { kind: 'cap', start: p, p0: p, p1: p }; this.drawOver(); return; }
     if (['line', 'rect'].includes(this.tool)) {
       startDrawingEdit(sym);
       this.drag = { kind: 'new', type: this.tool, a: this.pending || at, b: at, start: p, second: !!this.pending };
@@ -282,6 +286,7 @@ export class PriceChart {
       } else this.drawOver();
       return;
     }
+    if (d.kind === 'cap') { d.p1 = { x: Math.max(g.plot.x, Math.min(g.plot.x + g.plot.w, p.x)), y: Math.max(g.plot.y, Math.min(g.plot.y + g.plot.h, p.y)) }; this.drawOver(); return; }
     if (d.kind === 'new') d.b = at;
     else if (d.kind === 'level') d.d.p = at.p;
     else if (d.kind === 'ray') d.d.a = at;
@@ -298,6 +303,12 @@ export class PriceChart {
     this.host.style.cursor = '';
     if (!d) return;
     if (cancelled) { finishDrawingEdit(sym, false); this.pending = null; this.sel = null; this.ui(); this.drawOver(); return; }
+    if (d.kind === 'cap') {
+      // a box dragged around some candles reads those; a tap reads everything on the chart
+      const far = Math.abs(d.p1.x - d.p0.x) >= 14 && Math.abs(d.p1.y - d.p0.y) >= 10;
+      this.captureBox(far ? d.p0 : null, far ? d.p1 : null);
+      return;
+    }
     if (d.kind === 'new') {
       const far = Math.hypot(p.x - d.start.x, p.y - d.start.y) >= 10;
       if (cancelled || !g) this.pending = null;
@@ -344,36 +355,72 @@ export class PriceChart {
     const under = d.first0 + (d.mid0 - g.plot.x) / d.cw0; // the candle that was between the fingers stays between them
     this.setView(under - ((a.x + b.x) / 2 - g.plot.x) / (g.plot.w / slots), slots);
   }
+  // ---- Capture: the trader draws a box (or asks for the whole chart) and INDAI reads what is inside it.
+  // The picture is taken without the box, the crosshair or the drawing handles on it.
+  captureBox(a, b) {
+    const g = this.geo;
+    if (!g) return;
+    const box = a && b ? { x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x), y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y) }
+      : { x0: g.plot.x, x1: g.plot.x + g.plot.w, y0: g.plot.y, y1: g.plot.y + g.plot.h };
+    this.drag = null; this.hover = null; this.sel = null;
+    this.setDrawing(false);
+    this.draw();
+    const shot = { sym: g.sym, tf: g.tf, whole: !(a && b), t0: tOf(g, box.x0), t1: tOf(g, box.x1), lo: pOf(g, box.y1), hi: pOf(g, box.y0), image: this.snapshot(box), at: Date.now() };
+    if (this.onCapture) this.onCapture(shot);
+  }
+  analyzeView() { this.captureBox(null, null); }
+  snapshot(box, maxW = 960) {
+    const g = this.geo;
+    try {
+      const d = this.base.width / Math.max(1, this.base.clientWidth), right = g.plot.x + g.plot.w;
+      const axis = Math.max(0, Math.min(g.axisW, this.base.clientWidth - right)), bw = Math.max(1, box.x1 - box.x0), h = Math.max(1, box.y1 - box.y0);
+      const k = Math.min(1.5, maxW / (bw + axis)), c = document.createElement('canvas');
+      c.width = Math.round((bw + axis) * k); c.height = Math.round(h * k);
+      const x = c.getContext('2d');
+      x.fillStyle = C.ink; x.fillRect(0, 0, c.width, c.height);
+      for (const src of [this.base, this.over]) {
+        x.drawImage(src, box.x0 * d, box.y0 * d, bw * d, h * d, 0, 0, bw * k, h * k);
+        if (axis) x.drawImage(src, right * d, box.y0 * d, axis * d, h * d, bw * k, 0, axis * k, h * k);
+      }
+      return c.toDataURL('image/jpeg', 0.82);
+    } catch { return null; }
+  }
   // The time under a pixel across the chart, and back: what a drawing's ends are stored and placed by.
   timeAt(x) { return this.geo ? tOf(this.geo, x) : null; }
   xAt(t) { return this.geo ? xOf(this.geo, t) : null; }
 
   draw() {
     const { ctx, w: W, h: H } = fit(this.base);
-    const app = this.app, s = app.settings, sym = s.main, iv = s.interval;
-    const bars = app.feed.getBars(sym, iv), q = app.feed.quote(sym);
+    const app = this.app, s = app.settings, sym = s.main, iv = app.tf ? app.tf.current() : s.interval, long = isLong(iv);
+    const bars = app.tf ? app.tf.bars(sym, iv) : app.feed.getBars(sym, iv), q = app.feed.quote(sym);
     this.geo = null;
     const axisW = W < 420 ? 50 : 58;
     const plot = { x: 4, y: 8, w: W - axisW - 6, h: H - 30 };
-    if (bars.length < 2) {
-      txt(ctx, 'Loading market data…', W / 2, H / 2 - 6, { size: 14, color: C.dim, align: 'center' });
+    if (bars.length < (long ? 1 : 2)) {
+      if (long && app.tf) app.tf.want(sym, iv);
+      txt(ctx, long ? 'Loading daily candles…' : 'Loading market data…', W / 2, H / 2 - 6, { size: 14, color: C.dim, align: 'center' });
       if (app.feed.status.note) txt(ctx, app.feed.status.note, W / 2, H / 2 + 16, { size: 11.5, color: C.faint, align: 'center' });
       this.drawOver();
       return;
     }
-    const sess = chartSession(), ivMs = INTERVAL_MS[iv];
-    const closes = bars.map(b => b.c);
-    const e5 = ema(closes, 5), e12 = ema(closes, 12), e34 = ema(closes, 34), e50 = ema(closes, 50), vw = vwap(bars);
+    // Daily and weekly: the candle still forming plays the part of today's session, and every earlier candle is history.
+    const sess = long ? { open: bars[bars.length - 1].t, close: bars[bars.length - 1].t + 1 } : chartSession(), ivMs = TF_MS[iv] || INTERVAL_MS[iv];
+    const hs0 = long && app.tf ? app.tf.hist(sym, iv, sess.open) : null;
+    const closes = long && hs0 ? [...hs0.bars.map(b => b.c), ...bars.map(b => b.c)] : bars.map(b => b.c), tail = (a) => long ? a.slice(-bars.length) : a;
+    const e5 = tail(ema(closes, 5)), e12 = tail(ema(closes, 12)), e34 = tail(ema(closes, 34)), e50 = tail(ema(closes, 50)), vw = long ? bars.map(() => null) : vwap(bars);
     const idxOf = (b) => Math.round((b.t - sess.open) / ivMs);
     // Fit the chart to the session so far, with room to the right, instead of leaving most of it empty in the morning.
     // On a narrow screen, show the most recent stretch at a readable candle width instead of squeezing the whole day in.
     const full = Math.max(bars.length, Math.ceil((sess.close - sess.open) / ivMs)), li0 = idxOf(bars[bars.length - 1]);
     // Once the session is over, its after-hours candles and the next morning's pre-market follow it, one slot each.
-    const xa = app.ext ? app.ext.after(sym, iv, sess.close) : [], XN = xa.length, li = XN ? full + XN - 1 : li0;
-    const minSlots = { '1min': 45, '5min': 30, '15min': 14 }[iv] || 30;
+    const xa = app.tf ? app.tf.after(sym, iv, sess.close) : app.ext ? app.ext.after(sym, iv, sess.close) : [], XN = xa.length, li = XN ? full + XN - 1 : li0;
+    const minSlots = { '1min': 45, '5min': 30, '15min': 14, '30min': 13, '1h': 7, '4h': 6, '1D': 130, '1W': 104 }[iv] || 30;
+    // 30-minute and longer candles open with earlier sessions in view, the way TradingView does
+    const back = { '30min': 52, '1h': 42, '4h': 36, '1D': 130, '1W': 104 }[iv] || 0;
     let slots = XN ? li + 3 : Math.min(full, Math.max(minSlots, Math.ceil((li + 1) * 1.3) + 1)), first = 0;
     const maxSlots = Math.max(30, Math.floor(plot.w / 3.4));
-    if (slots > maxSlots) { first = Math.max(0, Math.min((XN ? li + 3 : full) - maxSlots, li - Math.floor(maxSlots * 0.86))); slots = maxSlots; }
+    if (back) { slots = Math.min(maxSlots, Math.max(back, (XN ? li : full) + 3)); first = (XN ? li : Math.max(li0, full - 1)) + 3 - slots; }
+    else if (slots > maxSlots) { first = Math.max(0, Math.min((XN ? li + 3 : full) - maxSlots, li - Math.floor(maxSlots * 0.86))); slots = maxSlots; }
     // The trader's own view (dragged or zoomed) replaces the automatic one until it is reset, or the ticker, the candle
     // size or the session changes. It is kept where at least a few candles stay on screen.
     const key = sym + '|' + iv + '|' + sess.open;
@@ -384,19 +431,20 @@ export class PriceChart {
       this.syncTouch(); this.ui();
     }
     // Earlier sessions, when the trader has scrolled or zoomed back to them, sit at negative slots left of today's open.
-    const hs = app.history ? app.history.series(sym, iv, sess.open) : null, HN = hs ? hs.bars.length : 0;
+    const hs = long ? hs0 : app.tf ? app.tf.hist(sym, iv, sess.open) : app.history ? app.history.series(sym, iv, sess.open) : null, HN = hs ? hs.bars.length : 0;
     const zoomMax = Math.min(2400, Math.max(full, 30) + HN + XN);
     if (this.view) {
       slots = Math.max(MIN_SLOTS, Math.min(zoomMax, this.view.slots));
       first = Math.max((HN ? -HN : idxOf(bars[0])) + 3 - slots, Math.min(li - 2, this.view.first));
       this.view = { first, slots };
-      if (app.history && first < 60 - HN) app.history.want(sym); // near the oldest candle we have: fetch older ones
-    }
+    } else if (back) first = Math.max((HN ? -HN : idxOf(bars[0])) + 3 - slots, first);
+    // near the oldest candle we have: fetch older ones
+    if ((this.view || back) && first < 60 - HN) { if (app.tf) app.tf.want(sym, iv); else if (app.history) app.history.want(sym); }
     const cw = plot.w / slots;
     const xi = (i) => plot.x + (i - first + 0.5) * cw;
     const pts = [];
     for (let j = Math.max(0, Math.ceil(first - 1 + HN)); j < HN && j - HN < first + slots; j++) pts.push({ b: hs.bars[j], i: j - HN, e5: hs.e5[j], e12: hs.e12[j], e34: hs.e34[j], e50: hs.e50[j], vw: hs.vw[j], day: hs.day[j], x: hs.x[j] });
-    bars.forEach((b, k) => { const i = idxOf(b); if (i > first - 1 && i < first + slots) pts.push({ b, i, e5: e5[k], e12: e12[k], e34: e34[k], e50: e50[k], vw: vw[k], day: -1, x: 0 }); });
+    bars.forEach((b, k) => { const i = idxOf(b); if (i > first - 1 && i < first + slots) pts.push({ b, i, e5: e5[k], e12: e12[k], e34: e34[k], e50: e50[k], vw: vw[k], day: long ? 0 : -1, x: 0 }); });
     xa.forEach((b, k) => { const i = full + k; if (i > first - 1 && i < first + slots) pts.push({ b, i, e5: null, e12: null, e34: null, e50: null, vw: null, day: -2, x: 1 }); });
     if (!pts.length) return;
     let lo = Math.min(...pts.map(p => p.b.l)), hi = Math.max(...pts.map(p => p.b.h));
@@ -428,14 +476,31 @@ export class PriceChart {
     const everyMin = spanMin <= 25 ? 5 : spanMin <= 50 ? 10 : spanMin <= 100 ? 15 : spanH <= 2.2 ? 30 : spanH <= 4 ? 60 : W < 460 ? 120 : 60;
     // where each earlier session starts, and where today starts: a line and the date
     const dayXs = [];
-    if (HN) for (const [i, t] of [...hs.starts.map(j => [j - HN, hs.bars[j].t]), [0, sess.open]]) {
+    if (HN && !long) for (const [i, t] of [...hs.starts.map(j => [j - HN, hs.bars[j].t]), [0, sess.open]]) {
       const x = Math.round(plot.x + (i - first) * cw) + 0.5;
       if (x < plot.x + 1 || x > plot.x + plot.w - 30) continue;
       ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
       if (!dayXs.length || x - dayXs[dayXs.length - 1] > 44) { txt(ctx, fmtDay(t), x + 4, plot.y + plot.h + 15, { size: 10.5, weight: 600, color: C.dim }); dayXs.push(x); }
     }
-    const labels = hs ? hs.bars.map((bar, index) => ({ t: bar.t, slot: index - HN })) : [];
-    for (let minute = 570; minute <= 960; minute += 5) {
+    if (long) { // daily and weekly: a faint line and a label where each month (or year) starts
+      const marks = [...(hs ? hs.bars.map((b, j) => ({ ym: hs.ym[j], slot: j - HN })) : []), ...bars.map(b => { const p = etParts(b.t); return { ym: p.y * 12 + p.m - 1, slot: idxOf(b) }; })];
+      const months = slots * ivMs / (30.4 * 864e5), stepM = iv === '1W' ? (months > 60 ? 12 : months > 30 ? 6 : 3) : months > 36 ? 12 : months > 16 ? 6 : months > 7 ? 3 : months > 3.5 ? 2 : 1;
+      let prev = null, lastLx = -99;
+      for (const m of marks) {
+        if (m.slot < first - 1 || m.slot > first + slots) { prev = m.ym; continue; }
+        if (m.ym === prev) continue;
+        prev = m.ym;
+        if ((m.ym % 12) % stepM) continue;
+        const x = Math.round(plot.x + (m.slot - first) * cw) + 0.5;
+        if (x < plot.x + 8 || x > plot.x + plot.w - 22 || x - lastLx < 40) continue;
+        lastLx = x;
+        const jan = m.ym % 12 === 0, word = jan || stepM >= 12 ? String(Math.floor(m.ym / 12)) : MON[m.ym % 12];
+        ctx.strokeStyle = jan ? 'rgba(255,255,255,0.14)' : C.grid; ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.stroke();
+        txt(ctx, word, x, plot.y + plot.h + 15, { size: 10.5, weight: jan ? 600 : 400, color: jan ? C.dim : C.faint, align: 'center' });
+      }
+    }
+    const labels = long ? [] : hs ? hs.bars.map((bar, index) => ({ t: bar.t, slot: index - HN })) : [];
+    for (let minute = 570; minute <= 960 && !long; minute += 5) {
       const t = sess.open + (minute - 570) * 60000;
       if (t <= sess.close) labels.push({ t, slot: (t - sess.open) / ivMs });
     }
@@ -534,7 +599,7 @@ export class PriceChart {
     }
     // Ideas: a small arrow under (call) or over (put) the candle that confirmed each one. For the one in focus,
     // lines for the stop and the target from that candle onward, and a tick at the entry.
-    for (const d of ideas) {
+    for (const d of long || iv === '4h' ? [] : ideas) {
       const i = Math.floor(((d.forming ? d.barT : d.barT + 300e3 - 1) - sess.open) / ivMs), p = pts.find(k => k.i === i) || (d.forming ? pts[pts.length - 1] : null);
       if (!p) continue;
       const x = xi(p.i), up = d.dir > 0, col = up ? C.up : C.down, sz = d.focus ? 6.5 : 5;
@@ -585,7 +650,7 @@ export class PriceChart {
       if (newDay) txt(ctx, fmtDay(t), x + 4, plot.y + plot.h + 15, { size: 10.5, weight: 600, color: C.dim });
       else txt(ctx, fmtHM(t).replace(':00', '').replace(' ', '').toLowerCase(), x, plot.y + plot.h + 15, { size: 10.5, color: C.faint, align: 'center' });
     }
-    this.geo = { W, plot, pts, xi, yv, cw, first, lo, hi, autoLo, autoHi, axisW, slots, full, maxSlots: zoomMax, open: sess.open, ivMs, H: HN, hist: hs ? hs.bars : [], X: XN, xb: xa };
+    this.geo = { W, plot, pts, xi, yv, cw, first, lo, hi, autoLo, autoHi, axisW, slots, full, maxSlots: zoomMax, open: sess.open, ivMs, H: HN, hist: hs ? hs.bars : [], X: XN, xb: xa, tf: iv, long, sym };
     this.drawOver();
   }
 
@@ -637,6 +702,13 @@ export class PriceChart {
       handles.push([xOf(g, a.t), g.yv(a.p)]);
     }
     for (const [x, y] of handles) { ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill(); ctx.strokeStyle = C.white; ctx.lineWidth = 2; ctx.stroke(); }
+    if (this.drag && this.drag.kind === 'cap') {
+      const { p0, p1 } = this.drag, x0 = Math.min(p0.x, p1.x), y0 = Math.min(p0.y, p1.y), w = Math.abs(p1.x - p0.x), h = Math.abs(p1.y - p0.y);
+      ctx.fillStyle = hexA(C.gold, 0.10); ctx.fillRect(x0, y0, w, h);
+      ctx.strokeStyle = C.gold; ctx.lineWidth = 1.6; ctx.setLineDash([6, 4]); ctx.strokeRect(x0 + 0.5, y0 + 0.5, w, h); ctx.setLineDash([]);
+      for (const [cx, cy] of [[x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h]]) { ctx.fillStyle = C.gold; ctx.fillRect(cx - 3, cy - 3, 6, 6); }
+      if (w > 64 && h > 22) { rr(ctx, x0 + 4, y0 + 4, 62, 18, 4); ctx.fillStyle = C.gold; ctx.fill(); txt(ctx, 'CAPTURE', x0 + 35, y0 + 13.5, { size: 10, weight: 700, color: '#1c1404', align: 'center', base: 'middle' }); }
+    }
     ctx.restore();
     for (const t of tags) {
       rr(ctx, right + 2, t.y - 9, axisW - 2, 18, 4); ctx.fillStyle = t.on ? C.white : C.violet; ctx.fill();
@@ -664,7 +736,7 @@ export class PriceChart {
     if (!g) return;
     this.drawMarks(ctx, g);
     this.drawMagnifier();
-    if (!h || (this.drag && this.drag.kind === 'pinch')) return;
+    if (!h || (this.drag && (this.drag.kind === 'pinch' || this.drag.kind === 'cap'))) return;
     const { plot, pts, xi, cw, first, lo, hi, axisW } = g;
     if (h.x < plot.x || h.x > plot.x + plot.w || h.y < plot.y || h.y > plot.y + plot.h) return;
     const slot = Math.floor((h.x - plot.x) / cw + first);
@@ -673,7 +745,7 @@ export class PriceChart {
     const x = Math.round(xi(best.i)) + 0.5, y = Math.round(h.y) + 0.5;
     ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, plot.y); ctx.lineTo(x, plot.y + plot.h); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke();
-    const b = best.b, when = (b.t < g.open ? fmtDay(b.t) + ' ' : '') + fmtHM(b.t);
+    const b = best.b, when = g.long ? (g.tf === '1W' ? 'Wk ' : '') + fmtDate(b.t) : (b.t < g.open ? fmtDay(b.t) + ' ' : '') + fmtHM(b.t);
     const parts = W < 460
       ? [when, `O ${fmtPrice(b.o)}`, `H ${fmtPrice(b.h)}`, `L ${fmtPrice(b.l)}`, `C ${fmtPrice(b.c)}`]
       : [when, `O ${fmtPrice(b.o)}`, `H ${fmtPrice(b.h)}`, `L ${fmtPrice(b.l)}`, `C ${fmtPrice(b.c)}`, `V ${fmtVol(b.v)}`];

@@ -8,7 +8,19 @@ same backend, same brain, same voice. Only the screens are different.
 ## What is here
 
 - Top bar with the market clock and where prices come from (live, delayed or demo).
-- Watchlist with sparklines, the main candlestick chart (1, 5, 15 minute) with VWAP, EMA clouds and GEX levels, lead/lag, GEX levels.
+- Watchlist with sparklines, the main candlestick chart (1, 5, 15 and 30 minutes, 1 and 4 hours, daily and weekly) with VWAP,
+  EMA clouds and GEX levels, lead/lag, GEX levels. 30 minutes and longer open with earlier sessions in view; daily and
+  weekly go back years (INDAI's backend, plus Twelve Data when a key is saved in Settings).
+- Candles kept on the device: the minutes the page receives (regular and extended hours, 45 days) and every daily candle
+  are saved in the browser, so yesterday and earlier days are still on the chart after the close, over the weekend and
+  when the backend has nothing for them.
+- Analyze and Capture: tap Analyze (or pick Capture in the drawing tools), drag a box around candles, and INDAI reads them:
+  a picture of the box, the candle patterns by TA-Lib's rules and the six structure proxies of *The Market Pattern Atlas*
+  (with the side and the trend/volatility bin the atlas filed them under), shapes, trend, momentum and MACD divergences,
+  support, resistance and GEX walls, the bull, bear and range paths with trigger, invalidation and objectives, which
+  timeframes to look at next (one tap reads the chart again at that size), and INDAI's own read. A tap reads the whole
+  chart. Captures are kept on the device and can be opened again. The atlas's tested numbers for each pattern come from
+  the backend once it offers them (`mode:"atlas"` in the brain's status); nothing on the device makes up a probability.
 - Ideas strip under the top bar on every screen: each setup alert the moment its candle confirms (and "forming" a minute or
   more before), newest first. Tap one for the reasons, the sized contract, stop, entry and target, what price did next, and
   one tap to rate it or see it on the chart. The day's ideas survive a reload, and ones you missed are caught up quietly.

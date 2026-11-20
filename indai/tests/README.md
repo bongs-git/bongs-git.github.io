@@ -8,6 +8,8 @@ here so whoever works on the website next can run them.
 python3 -m http.server 8765 --bind 127.0.0.1 &
 cd indai/tests && npm i playwright && npx playwright install chromium
 node chart-test.js        # moving, zooming, axes, drawing, earlier sessions, the TradingView panel
+node capture-test.js      # candle sizes 1m to weekly, Analyze / Capture and its reading, candles kept on the device
+node patterns-unit.mjs    # the Capture reading's detectors against TA-Lib 0.8.3 (talib-fixture.json), proxies, anchored candles
 node ext-test.js          # pre-market and after-hours candles and the price line (sets its own clock: same result at any hour)
 node flow.js              # the whole app in demo mode, phone and laptop
 node mock.js              # against a stand-in backend that follows HANDOFF.md (lib.js is that stand-in)
