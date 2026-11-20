@@ -25,7 +25,7 @@
   input { width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: inherit; padding: 10px 12px; margin-bottom: 10px; }
   #state { font-weight: 600; }
   #state.ok { color: var(--up); } #state.bad { color: var(--down); }
-  #out { min-height: 1.5em; } #out.ok { color: var(--up); } #out.bad { color: var(--down); }
+  #out { min-height: 1.5em; } #out.ok { color: var(--up); } #out.bad, #check.bad { color: var(--down); }
   .quiet { background: none; border: 0; color: var(--dim); font-weight: 400; text-decoration: underline; min-height: 44px; width: auto; padding: 8px 0; }
   [hidden] { display: none !important; }
 </style>
@@ -44,6 +44,7 @@
   <div class="card">
     <p id="state" role="status">Checking…</p>
     <p class="dim" id="detail"></p>
+    <p class="dim" id="check" hidden></p>
     <button id="off" class="quiet" hidden>Disconnect Schwab</button>
   </div>
 
@@ -104,11 +105,23 @@ async function load() {
     const s = await ask({ op: 'status' });
     show(s);
     if (s.configured) { const { url } = await ask({ op: 'start' }); $('go').href = url; $('go').setAttribute('aria-disabled', 'false'); }
+    if (s.configured && !s.connected) check();
   } catch (e) {
     if (e.status === 401) { pass = ''; $('passcard').hidden = false; say($('state'), 'That passcode was not accepted.', 'bad'); }
     else if (e.status === 404) say($('state'), 'This part of INDAI is not switched on yet.', 'bad');
     else say($('state'), e.message, 'bad');
   }
+}
+// Asks Schwab whether it knows the app's key and secret, so a refusal on Schwab's own page can be explained.
+async function check() {
+  const el = $('check');
+  try {
+    const c = await ask({ op: 'check' });
+    el.hidden = false;
+    if (c.recognised === true) say(el, `Schwab recognises your app's key and secret. INDAI sends the callback address ${c.callback}: it must match the Callback URL on your Schwab app exactly.`, 'dim');
+    else if (c.recognised === false) say(el, 'Schwab does not recognise the App Key and Secret saved in Supabase. Copy both again from your Schwab app: the App Key into SCHWAB_APP_KEY, the Secret into SCHWAB_APP_SECRET.', 'bad');
+    else say(el, `Could not check the app with Schwab just now (answer ${c.status}${c.error ? ', ' + c.error : ''}).`, 'dim');
+  } catch { el.hidden = true; }
 }
 async function finish(text) {
   if (!text || !text.trim()) { say($('out'), 'Nothing to paste yet. Copy the address of the page that failed to load first.', 'bad'); return; }
