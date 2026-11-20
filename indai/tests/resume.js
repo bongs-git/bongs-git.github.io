@@ -53,7 +53,7 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
   const took = Date.now() - t0, st2 = await A(() => window.__indai.app.feed.status.cboe);
   check('after dropped requests the feed recovers within seconds, with no lock-out', st1 === 'err' && st2 === 'ok' && took < 7000 && seen.snapshot > before, JSON.stringify({ st1, st2, tookMs: took, dropped: seen.dropped }));
   const badge = await A(() => document.getElementById('t-badge').textContent);
-  check('badge is back to normal', /Delayed/.test(badge), badge);
+  check('badge is back to normal', /CBOE, delayed 15 min/.test(badge), badge);
   // 2. coming back to the app pulls fresh prices at once
   await sleep(9000);
   const b2 = seen.snapshot;
@@ -63,7 +63,7 @@ function bars(sym, n) { let p = PX[sym], out = []; let s = sym.charCodeAt(0) * 7
   // 3. badge explains how to get live prices
   await page.tap('#t-badge'); await sleep(300);
   const toast = await page.textContent('#toast');
-  check('badge tap explains the delay and how to go live', /Finnhub/.test(toast) && /TradingView/.test(toast), JSON.stringify(toast));
+  check('badge tap explains this ticker’s source and delay', /QQQ/.test(toast) && /CBOE, delayed 15 min/.test(toast), JSON.stringify(toast));
   await page.screenshot({ path: `${OUT}/r-phone-toast.png` });
   check('no page errors', errs.length === 0, errs.join('|'));
   await browser.close();

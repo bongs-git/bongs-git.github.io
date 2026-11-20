@@ -121,7 +121,7 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     check('[laptop] the Delete key removes the selected line', (await st(p)).list.length === 0);
     await p.keyboard.press('Escape'); await sleep(100);
     const s16 = await st(p);
-    check('[laptop] Escape closes the drawing bar', !s16.drawing && s16.barHidden && s16.touch === 'about:blank');
+    check('[laptop] Escape closes the drawing bar', !s16.drawing && s16.barHidden && s16.touch === '');
     // scrolling back into earlier sessions
     const h0 = await p.evaluate(() => { const g = window.__indai.app.chart.geo; return { H: g.H, full: g.full, max: g.maxSlots }; });
     const Bh = await box(p), hx = Bh.x + Bh.w * 0.4, hy = Bh.y + Bh.h * 0.5;
@@ -185,7 +185,7 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     check('[phone] then a finger moves the chart up and down too', pb.lo > pa.lo);
     await p.tap('#ch-reset'); await sleep(250);
     const pc = await st(p);
-    check('[phone] Reset view fits it again and gives page scrolling back', !pc.manual && pc.touch === 'about:blank');
+    check('[phone] Reset view fits it again and gives page scrolling back', !pc.manual && pc.touch === '');
     // draw with a finger
     await p.tap('#ch-draw'); await p.tap('#ch-tools [data-tool="line"]'); await sleep(150);
     const B1 = await box(p);
@@ -206,7 +206,7 @@ const ready = async (p) => { await p.waitForFunction(() => window.__indai && win
     await p.tap('#ch-clear'); await sleep(150);
     check('[phone] Clear all removes them', (await st(p)).list.length === 0);
     await p.tap('#ch-draw'); await sleep(150);
-    check('[phone] closing Draw gives page scrolling back to the chart', (await st(p)).touch === 'about:blank');
+    check('[phone] closing Draw gives page scrolling back to the chart', (await st(p)).touch === '');
     check('[phone] no page errors', errs.length === 0, errs.slice(0, 2));
     await ctx.close();
   }

@@ -24,7 +24,7 @@ async function quietFixture(page) {
   await page.addInitScript(() => {
     if (window !== window.top) return;
     const settings = JSON.parse(localStorage.getItem('jarvis.settings.v1') || '{}');
-    settings.voice = false;
+    settings.voice = false; settings.voiceEngine = 'system';
     localStorage.setItem('jarvis.settings.v1', JSON.stringify(settings));
   });
 }

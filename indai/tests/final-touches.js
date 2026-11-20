@@ -73,7 +73,7 @@ const NOW = Date.parse('2026-11-19T18:00:00Z');
     assert.equal(await page.evaluate(() => (JSON.parse(localStorage.getItem('indai.web.draw.v1')).IWM || []).length), 1);
     console.log(`PASS ${width}px rectangle, horizontal ray, delete and undo`);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
-    assert.equal(overflow, false);
+    assert.equal(overflow, false, JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('body *')].filter(n=>{const r=n.getBoundingClientRect();return r.right>innerWidth+1&&r.width>0;}).slice(0,12).map(n=>({tag:n.tagName,id:n.id,cls:n.className,right:n.getBoundingClientRect().right})))));
     const buttons = await page.locator('#ch-tools button').evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().height));
     assert(buttons.every(h => h >= 44));
 

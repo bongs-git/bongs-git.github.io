@@ -268,11 +268,14 @@ export function initViews(app) {
     tvKey = key;
     // Use the vendor-hosted embed directly: its Web Component accesses cookies and cannot run
     // in an opaque srcdoc sandbox. Vendor scripts remain cross-origin from INDAI and its token.
-    frame.src = tvOn ? 'https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=en#' + encodeURIComponent(JSON.stringify({
+    const next = frame.cloneNode(false);
+    next.src = tvOn ? 'https://www.tradingview-widget.com/embed-widget/advanced-chart/?locale=en#' + encodeURIComponent(JSON.stringify({
       symbol: s.main, interval: TV_IV[s.interval] || '5', timezone: 'America/New_York', theme: 'dark', style: '1',
       allow_symbol_change: true, hide_side_toolbar: false, withdateranges: true, save_image: false,
       autosize: true, width: '100%', height: '100%', support_host: 'https://www.tradingview.com',
     })) : 'about:blank';
+    next.setAttribute('sandbox', tvOn ? 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox' : 'allow-scripts');
+    frame.replaceWith(next);
 
   };
   app.showTradingView = (on) => { tvOn = on == null ? !tvOn : !!on; if (tvOn) chart.setDrawing(false); syncTv(); app.markDirty('chart'); };
